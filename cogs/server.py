@@ -84,29 +84,23 @@ class Server(commands.Cog, name="server"):
         :param server_id: The server ID which should be started.
         :param server_type: The server address which should be referenced.
         """
-        
-        async with aiohttp.ClientSession() as session:
-            if server_id == "RNR":
-                basic_auth = base64.b64encode(f"{self.bot.config['arma_server_web_admin'][server_type]['public_username']}:{self.bot.config['arma_server_web_admin'][server_type]['public_password']}".encode()).decode()
-            else:
-                basic_auth = await get_user_authentication(self, context.author.id, context.guild.id, server_type)
-            api = f"{self.bot.config['arma_server_web_admin'][server_type]['address']}api/servers/{server_id}/start"
-            async with session.post(api, headers={'Authorization': "Basic %s" % basic_auth}) as response:
-                if response.status == 200:
-                    embed = discord.Embed(title="Server Started", description=f"The server (`{server_id}`) has been started.", color=0xBEBEFE)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
-                elif response.status == 401:
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
-                elif response.status == 500:
-                    embed = await server_not_exist_embed(self, server_id)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
-                else:
-                    embed = await error_embed(self, response)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
+        response = await self.bot.arma_server_web_admin.server_start(context.author.id, context.guild.id, server_type, server_id)
+        if response.status == 200:
+            embed = discord.Embed(title="Server Started", description=f"The server (`{server_id}`) has been started.", color=0xBEBEFE)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        elif response.status == 401:
+            embed = await unauthorised_embed(self)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        elif response.status == 500:
+            embed = await server_not_exist_embed(self, server_id)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        else:
+            embed = await error_embed(self, response)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
 
 
 
@@ -122,27 +116,23 @@ class Server(commands.Cog, name="server"):
         :param context: The hybrid command context.
         :param server_id: The server which should be started.
         """
-
-        async with aiohttp.ClientSession() as session:
-            basic_auth = await get_user_authentication(self, context.author.id, context.guild.id, server_type)
-            api = f"{self.bot.config['arma_server_web_admin'][server_type]['address']}api/servers/{server_id}/stop"
-            async with session.post(api, headers={'Authorization': "Basic %s" % basic_auth}) as response:
-                if response.status == 200:
-                    embed = discord.Embed(title="Server Stopped", description=f"The server (`{server_id}`) has been stopped.", color=0xBEBEFE)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
-                elif response.status == 401:
-                    embed = await unauthorised_embed(self)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
-                elif response.status == 500:
-                    embed = await server_not_exist_embed(self, server_id)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
-                else:
-                    embed = await error_embed(self, response)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
+        response = await self.bot.arma_server_web_admin.server_stop(context.author.id, context.guild.id, server_type, server_id)
+        if response.status == 200:
+            embed = discord.Embed(title="Server Stopped", description=f"The server (`{server_id}`) has been stopped.", color=0xBEBEFE)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        elif response.status == 401:
+            embed = await unauthorised_embed(self)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        elif response.status == 500:
+            embed = await server_not_exist_embed(self, server_id)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        else:
+            embed = await error_embed(self, response)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
     
 
 
@@ -172,35 +162,30 @@ class Server(commands.Cog, name="server"):
 
         :param context: The hybrid command context.
         """
-
-        async with aiohttp.ClientSession() as session:
-            basic_auth = await get_user_authentication(self, context.author.id, context.guild.id, server_type)
-            # print(basic_auth, server_type)
-            api = f"{self.bot.config['arma_server_web_admin'][server_type]['address']}api/servers/"
-            async with session.get(api, headers={'Authorization': "Basic %s" % basic_auth}) as response:
-                if response.status == 200:
-                    server_list = []
-                    server_ids = ""
-                    server_names = ""
-                    server_ports = ""
-                    for server in await response.json():
-                        server_list.append(server["uid"])
-                        server_ids = server_ids + "`" + server["uid"]  + "`" + "\n"
-                        server_names = server_names + "`"  + server["title"] + "`" + "\n"
-                        server_ports = server_ports + "`"  + str(server["port"]) + "`" + "\n"
-                    embed = discord.Embed(title="Available Servers", description="", color=0xBEBEFE)
-                    embed.add_field(name=f"ID", value=server_ids, inline=True)
-                    embed.add_field(name=f"Name", value=server_names, inline=True)
-                    embed.add_field(name=f"Port", value=server_ports, inline=True)
-                    await context.send(embed=embed, ephemeral=True, view=StartStopButtonSelection(self, message_context=context, server_type=server_type, server_list=server_list))
-                elif response.status == 401:
-                    embed = await unauthorised_embed(self)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
-                else:
-                    embed = await error_embed(self, response)
-                    embed.set_footer(text=f"{api}")
-                    await context.send(embed=embed, ephemeral=True)
+        response = await self.bot.arma_server_web_admin.get_server_config(context.author.id, context.guild.id, server_type)
+        if response.status == 200:
+            server_list = []
+            server_ids = ""
+            server_names = ""
+            server_ports = ""
+            for server in response.json_content:
+                server_list.append(server["uid"])
+                server_ids = server_ids + "`" + server["uid"]  + "`" + "\n"
+                server_names = server_names + "`"  + server["title"] + "`" + "\n"
+                server_ports = server_ports + "`"  + str(server["port"]) + "`" + "\n"
+            embed = discord.Embed(title="Available Servers", description="", color=0xBEBEFE)
+            embed.add_field(name=f"ID", value=server_ids, inline=True)
+            embed.add_field(name=f"Name", value=server_names, inline=True)
+            embed.add_field(name=f"Port", value=server_ports, inline=True)
+            await context.send(embed=embed, ephemeral=True, view=StartStopButtonSelection(self, message_context=context, server_type=server_type, server_list=server_list))
+        elif response.status == 401:
+            embed = await unauthorised_embed(self)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        else:
+            embed = await error_embed(self, response)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
 
 
 
@@ -215,40 +200,33 @@ class Server(commands.Cog, name="server"):
 
         :param context: The hybrid command context.
         """
-        async with aiohttp.ClientSession() as session:
-            #Get user authentication from the data base
-            basic_auth = await get_user_authentication(self, context.author.id, context.guild.id, server_type)
-            api = f"{self.bot.config['arma_server_web_admin'][server_type]['address']}api/servers/{server_id}"
-            #Get the server information from the server_id
-            async with session.get(api, headers={'Authorization': "Basic %s" % basic_auth}) as response:
-                #Successful response and server config recieved.
-                #print(response.status, response.reason, response.content)
-                if response.status == 200:
-                    server = await response.json()
-                    if not server is None:
-                        status_embed = await self.bot.server_status_embed(server_id, server_type, server_ip, server['port'], server["title"], server_description, server_modpack)
-                        if status_channel: #Add status message to database to keep track.
-                            if not message_id:
-                                message = await status_channel.send("Querying the servers....")
-                                message_id = message.id
-                            response = await self.bot.database.add_server_status(context.guild.id, status_channel.id, message_id, context.author.id, server_id, server_type, server_ip, server['port'], server["title"], server_description, server_modpack)
-                            if response:
-                                await context.send(f"The status message ({message_id}) has been setup in {status_channel} sucessfully, sending update...", ephemeral=True)
-                            #This update takes too long to send back to the interaction, can maybe call this back/defer. One for later maybe.
-                            await self.bot.update_server_status_message(context.guild.id, status_channel.id, message_id)
-                        else: #Just post current snapshot back to context
-                            await context.send(embed=status_embed)
-                    else: #ID/Nickname could not be found.
-                            status_embed = await server_not_exist_embed(self, server_id)
-                            await context.send(embed=status_embed, ephemeral=True)
-                elif response.status == 401:
-                    status_embed = await unauthorised_embed(self)
-                    status_embed.set_footer(text=f"{api}")
-                    await context.send(embed=status_embed, ephemeral=True)
-                else:
-                    status_embed = await error_embed(self, response)
-                    status_embed.set_footer(text=f"{api}")
-                    await context.send(embed=status_embed, ephemeral=True)
+        response = await self.bot.arma_server_web_admin.get_server_config(context.author.id, context.guild.id, server_type, server_id)
+        if response.status == 200:
+            server = response.json_content
+            if not server is None:
+                status_embed = await self.bot.server_status_embed(server_id, server_type, server_ip, server['port'], server["title"], server_description, server_modpack)
+                if status_channel: #Add status message to database to keep track.
+                    if not message_id:
+                        message = await status_channel.send("Querying the servers....")
+                        message_id = message.id
+                    response = await self.bot.database.add_server_status(context.guild.id, status_channel.id, message_id, context.author.id, server_id, server_type, server_ip, server['port'], server["title"], server_description, server_modpack)
+                    if response:
+                        await context.send(f"The status message ({message_id}) has been setup in {status_channel} sucessfully, sending update...", ephemeral=True)
+                    #This update takes too long to send back to the interaction, can maybe call this back/defer. One for later maybe.
+                    await self.bot.update_server_status_message(context.guild.id, status_channel.id, message_id)
+                else: #Just post current snapshot back to context
+                    await context.send(embed=status_embed)
+            else: #ID/Nickname could not be found.
+                status_embed = await server_not_exist_embed(self, server_id)
+                await context.send(embed=status_embed, ephemeral=True)
+        elif response.status == 401:
+            status_embed = await unauthorised_embed(self)
+            status_embed.set_footer(text=f"{response.url}")
+            await context.send(embed=status_embed, ephemeral=True)
+        else:
+            status_embed = await error_embed(self, response)
+            status_embed.set_footer(text=f"{response.url}")
+            await context.send(embed=status_embed, ephemeral=True)
 
 
 

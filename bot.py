@@ -15,6 +15,7 @@ import datetime
 import a2s
 
 from database import DatabaseManager
+from arma_server_web_admin import ArmaServerWebAdmin
 
 if not os.path.isfile(f"{os.path.realpath(os.path.dirname(__file__))}/config.json"):
     sys.exit("'config.json' not found! Please add it and try again.")
@@ -134,6 +135,7 @@ class DiscordBot(commands.Bot):
         self.logger = logger
         self.config = config
         self.database = None
+        self.arma_server_web_admin = None
 
     async def init_db(self) -> None:
         async with aiosqlite.connect(
@@ -290,6 +292,7 @@ class DiscordBot(commands.Bot):
                 f"{os.path.realpath(os.path.dirname(__file__))}/database/database.db"
             )
         )
+        self.arma_server_web_admin = ArmaServerWebAdmin(config=self.config, database=self.database)
 
     async def on_message(self, message: discord.Message) -> None:
         """
