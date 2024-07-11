@@ -1,0 +1,16 @@
+{
+  "prefix": "",
+  "invite_link": "",
+  "arma_server_web_admin" : {
+    "arma3" : {
+      "address": "",
+      "public_username": "",
+      "public_password": ""
+    },
+    "reforger" : {
+      "address": "",
+      "public_username": "",
+      "public_password": ""
+    }
+  }
+}
