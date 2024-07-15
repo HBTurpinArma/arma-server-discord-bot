@@ -2,3 +2,7 @@ aiohttp
 aiosqlite
 discord.py
 python-dotenv
+python-dotenv
+python-a2s
+asyncpraw
+praw
