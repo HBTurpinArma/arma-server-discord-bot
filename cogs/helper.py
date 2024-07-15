@@ -58,14 +58,16 @@ class Helper(commands.Cog, name="helper"):
 
         :param context: The hybrid command context.
         """
+        latest_reddit_url = await pull_recent_reddit_post_url("tawarmadivision")
+        
         buttons = discord.ui.View()
         buttons.add_item(discord.ui.Button(label="Twitch", style=discord.ButtonStyle.link, url = 'https://www.twitch.tv/tawarmadivision'))
-        buttons.add_item(discord.ui.Button(label="Reddit", style=discord.ButtonStyle.link, url = 'https://www.reddit.com/user/tawarmadivision/'))
+        buttons.add_item(discord.ui.Button(label="Reddit", style=discord.ButtonStyle.link, url = latest_reddit_url))
         buttons.add_item(discord.ui.Button(label="Twitter", style=discord.ButtonStyle.link, url = 'https://x.com/TheArmaUnit'))
         buttons.add_item(discord.ui.Button(label="Instagram", style=discord.ButtonStyle.link, url = 'https://www.instagram.com/taw.armadivision/'))
         buttons.add_item(discord.ui.Button(label="Facebook", style=discord.ButtonStyle.link, url = 'https://www.facebook.com/tawarma'))
         buttons.add_item(discord.ui.Button(label="TikTok", style=discord.ButtonStyle.link, url = 'https://www.tiktok.com/@arma.division.taw?_t=8nqYd9WmCub&_r=1'))
-        latest_reddit_url = await pull_recent_reddit_post_url("tawarmadivision")
+       
         embed = discord.Embed(title="Social Links", description=f"Check out all of our social pages, be sure to give a follow and a like on our recent posts!", color=0xBEBEFE)
         embed.set_image(url="https://i.imgur.com/LOaHCV2.png")
         
@@ -96,4 +98,6 @@ async def pull_recent_reddit_post_url(username: str):
 
     async for link in submissions:
         return "https://www.reddit.com"+ link.permalink
+    else: 
+        return 'https://www.reddit.com/user/tawarmadivision/'
 
