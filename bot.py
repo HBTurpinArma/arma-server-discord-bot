@@ -20,6 +20,7 @@ import logging
 import sys
 from arma_server_web_admin import ArmaServerDatabaseManager
 from arma_server_web_admin import ArmaServerWebAdmin
+from cogs.sao import ServerForumButton
 
 if not os.path.isfile(f"{os.path.realpath(os.path.dirname(__file__))}/config.json"):
     sys.exit("'config.json' not found! Please add it and try again.")
@@ -182,6 +183,9 @@ class DiscordBot(commands.Bot):
         self.logger.info("-------------------")
 
         await self.load_cogs()
+
+        #Persist any views from the cogs we need.
+        self.add_view(ServerForumButton(self))
 
     async def on_message(self, message: discord.Message) -> None:
         """
