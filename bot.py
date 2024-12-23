@@ -8,13 +8,17 @@ import math
 import time
 import aiosqlite
 import discord
+from discord import ChannelType
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from dotenv import load_dotenv
 import datetime
 import a2s
-
-from database import DatabaseManager
+import asyncio
+import aiofiles as aiof
+import logging
+import sys
+from arma_server_web_admin import ArmaServerDatabaseManager
 from arma_server_web_admin import ArmaServerWebAdmin
 
 if not os.path.isfile(f"{os.path.realpath(os.path.dirname(__file__))}/config.json"):
@@ -137,17 +141,6 @@ class DiscordBot(commands.Bot):
         self.database = None
         self.arma_server_web_admin = None
 
-    async def init_db(self) -> None:
-        async with aiosqlite.connect(
-            f"{os.path.realpath(os.path.dirname(__file__))}/database/database.db"
-        ) as db:
-            with open(
-                f"{os.path.realpath(os.path.dirname(__file__))}/database/schema.sql"
-            ) as file:
-                # print(file.read())
-                await db.executescript(file.read())
-            await db.commit()
-
     async def load_cogs(self) -> None:
         """
         The code in this function is executed whenever the bot will start.
@@ -164,115 +157,6 @@ class DiscordBot(commands.Bot):
                         f"Failed to load extension {extension}\n{exception}"
                     )
 
-    @tasks.loop(minutes=5.0)
-    async def update_server_status(self) -> None:
-        """
-        Setup the game status task of the bot.
-        """
-        unique_status_messages = await self.database.get_server_status_unique_messages()
-        for unique_status_message in unique_status_messages:
-            message = bot.get_channel(int(unique_status_message[1])).get_partial_message(int(unique_status_message[2]))
-            if message:
-                statuses = await self.database.get_server_status_from_message_id(str(unique_status_message[2]))
-                embeds = []
-                for status in statuses:
-                    status_embed = await self.server_status_embed(status[4],status[5],status[6],int(status[7]), status[8], status[9], status[10])
-                    embeds.append(status_embed)
-                try:
-                    await message.edit(content=None, embeds=embeds, view=None)
-                except discord.errors.NotFound:
-                    await self.database.remove_server_status(unique_status_message[0],unique_status_message[1],unique_status_message[2])
-            else: 
-                await self.database.remove_server_status(unique_status_message[0],unique_status_message[1],unique_status_message[2])
-
-
-
-    async def update_server_status_message(self, guild_id: str, channel_id: str, message_id: str) -> None:
-        """
-        Setup the game status task of the bot.
-        """
-        message = bot.get_channel(int(channel_id)).get_partial_message(int(message_id))
-        if message:
-            statuses = await self.database.get_server_status_from_message_id(message_id)
-            embeds = []
-            for status in statuses:
-                status_embed = await self.server_status_embed(status[4],status[5],status[6],int(status[7]), status[8], status[9], status[10])
-                embeds.append(status_embed)
-            try:
-                if len(embeds) == 1:
-                    await message.edit(content=None, embeds=embeds)
-                else:
-                    await message.edit(content=None, embeds=embeds, view=None)
-            except discord.errors.NotFound:
-                await self.database.remove_server_status(guild_id,channel_id,message_id)
-        else: 
-                await self.database.remove_server_status(guild_id,channel_id,message_id)
-
-
-    async def server_status_embed(self, server_id: str, server_type:str, server_ip: str, server_port: int, server_name: str, server_desc: str, server_modpack: str) -> None:
-        status_info = None
-        try:
-            a2s_info = await a2s.ainfo((server_ip, int(server_port) + 1), timeout=2)
-            status_info = dict(a2s_info)
-        except Exception as e:
-            pass
-
-        if status_info: #Online...
-            embed = discord.Embed(title=status_info["server_name"], description=f"{server_desc}", color=0x2BE02B, timestamp=datetime.datetime.utcnow())
-            embed.add_field(name="Map", value=f"```{status_info['map_name']}```", inline=True)
-            embed.add_field(name="Mission", value=f"```{status_info['game']}```", inline=True)
-            embed.add_field(name="Player Count", value=f"```{status_info['player_count']}/{status_info['max_players']}```", inline=True)
-            players_description = ""
-            score_description = ""
-            time_played_description = ""
-            try:
-                a2s_players = await a2s.aplayers((server_ip, int(server_port) + 1), timeout=2)
-                a2s_players = sorted(a2s_players, key=lambda x: int(dict(x)['score']), reverse=True)
-                for i, player in enumerate(a2s_players):
-                    if len(players_description) + len(score_description) + len(time_played_description) > 900:
-                        players_description = players_description + f"\n and {int(status_info['player_count']) - i} more players..."
-                        break 
-                    player_dict = dict(player)
-                    player_name = player_dict['name']
-                    if len(player_name) >= 33:
-                        player_name = player_name[:30] + "..."
-                    players_description = players_description + f"`{player_name}` \n"
-                    score_description = score_description + f"`{player_dict['score']}` \n"
-                    time_played = math.floor(player_dict['duration']/60)
-                    if time_played >= 60:
-                        time_played = f"{round(player_dict['duration']/60/60, 1)} Hours"
-                    else: 
-                        time_played = f"{math.floor(player_dict['duration']/60)} Minutes"
-                    time_played_description = time_played_description + f"`{time_played}` \n"
-                
-            except Exception as e:
-                players_description = ""
-                score_description = ""
-                time_played_description = ""
-
-            if len(a2s_players):
-                embed.add_field(name=f"Players", value=players_description, inline=True)
-                embed.add_field(name=f"Score", value=score_description, inline=True)
-                embed.add_field(name=f"Time Played", value=time_played_description, inline=True)
-
-            if server_modpack:
-                pass
-
-            embed.set_footer(text=f"Connect via {server_ip}:{server_port}")
-
-        else: #Offline...
-            embed = discord.Embed(title=server_name, description=f"Offline", color=0xE02B2B, timestamp=datetime.datetime.utcnow())
-    
-        return embed
-
-
-    @update_server_status.before_loop
-    async def before_update_server_status(self) -> None:
-        """
-        Cheeck if bot is ready before running the server status refreshes.
-        """
-        await self.wait_until_ready()
-
     async def setup_hook(self) -> None:
         """
         This will just be executed when the bot starts the first time.
@@ -284,15 +168,22 @@ class DiscordBot(commands.Bot):
             f"Running on: {platform.system()} {platform.release()} ({os.name})"
         )
         self.logger.info("-------------------")
-        await self.init_db()
-        await self.load_cogs()
-        self.update_server_status.start()
-        self.database = DatabaseManager(
+        
+        await self.grab_channels(1001559795310010539)
+
+        #Setup server status db and updates, along with web panel integration
+        await self.init_server_db()
+        self.database = ArmaServerDatabaseManager(
             connection=await aiosqlite.connect(
-                f"{os.path.realpath(os.path.dirname(__file__))}/database/database.db"
+                f"{os.path.realpath(os.path.dirname(__file__))}/arma_server_web_admin/database.db"
             )
         )
+        self.update_server_status.start()
         self.arma_server_web_admin = ArmaServerWebAdmin(config=self.config, database=self.database)
+
+        self.logger.info("-------------------")
+
+        await self.load_cogs()
 
     async def on_message(self, message: discord.Message) -> None:
         """
@@ -377,6 +268,126 @@ class DiscordBot(commands.Bot):
             await context.send(embed=embed)
         else:
             raise error
+
+    async def init_server_db(self) -> None:
+        async with aiosqlite.connect(
+            f"{os.path.realpath(os.path.dirname(__file__))}/arma_server_web_admin/database.db"
+        ) as db:
+            with open(
+                f"{os.path.realpath(os.path.dirname(__file__))}/arma_server_web_admin/schema.sql"
+            ) as file:
+                # print(file.read())
+                await db.executescript(file.read())
+            await db.commit()
+
+    @tasks.loop(minutes=5.0)
+    async def update_server_status(self) -> None:
+        """
+        Setup the game status task of the bot.
+        """
+        unique_status_messages = await self.database.get_server_status_unique_messages()
+        for unique_status_message in unique_status_messages:
+            message = bot.get_channel(int(unique_status_message[1])).get_partial_message(int(unique_status_message[2]))
+            if message:
+                statuses = await self.database.get_server_status_from_message_id(str(unique_status_message[2]))
+                embeds = []
+                for status in statuses:
+                    status_embed = await self.server_status_embed(status[4],status[5],status[6],int(status[7]), status[8], status[9], status[10])
+                    embeds.append(status_embed)
+                try:
+                    await message.edit(content=None, embeds=embeds, view=None)
+                except discord.errors.NotFound:
+                    await self.database.remove_server_status(unique_status_message[0],unique_status_message[1],unique_status_message[2])
+            else: 
+                await self.database.remove_server_status(unique_status_message[0],unique_status_message[1],unique_status_message[2])
+
+    async def update_server_status_message(self, guild_id: str, channel_id: str, message_id: str) -> None:
+        """
+        Setup the game status task of the bot.
+        """
+        message = bot.get_channel(int(channel_id)).get_partial_message(int(message_id))
+        if message:
+            statuses = await self.database.get_server_status_from_message_id(message_id)
+            embeds = []
+            for status in statuses:
+                status_embed = await self.server_status_embed(status[4],status[5],status[6],int(status[7]), status[8], status[9], status[10])
+                embeds.append(status_embed)
+            try:
+                if len(embeds) == 1:
+                    await message.edit(content=None, embeds=embeds)
+                else:
+                    await message.edit(content=None, embeds=embeds, view=None)
+            except discord.errors.NotFound:
+                await self.database.remove_server_status(guild_id,channel_id,message_id)
+        else: 
+                await self.database.remove_server_status(guild_id,channel_id,message_id)
+
+    async def server_status_embed(self, server_id: str, server_type:str, server_ip: str, server_port: int, server_name: str, server_desc: str, server_modpack: str) -> None:
+        status_info = None
+        try:
+            a2s_info = await a2s.ainfo((server_ip, int(server_port) + 1), timeout=2)
+            status_info = dict(a2s_info)
+        except Exception as e:
+            pass
+
+        a2s_players = []
+        if status_info: #Online...
+            embed = discord.Embed(title=status_info["server_name"], description=f"{server_desc}", color=0x2BE02B, timestamp=datetime.datetime.utcnow())
+            embed.add_field(name="Map", value=f"```{status_info['map_name']}```", inline=True)
+            embed.add_field(name="Mission", value=f"```{status_info['game']}```", inline=True)
+            embed.add_field(name="Player Count", value=f"```{status_info['player_count']}/{status_info['max_players']}```", inline=True)
+            players_description = ""
+            score_description = ""
+            time_played_description = ""
+            try:
+                a2s_players = await a2s.aplayers((server_ip, int(server_port) + 1), timeout=2)
+                a2s_players = sorted(a2s_players, key=lambda x: int(dict(x)['score']), reverse=True)
+                for i, player in enumerate(a2s_players):
+                    if len(players_description) + len(score_description) + len(time_played_description) > 900:
+                        players_description = players_description + f"\n and {int(status_info['player_count']) - i} more players..."
+                        break 
+                    player_dict = dict(player)
+                    player_name = player_dict['name']
+                    if len(player_name) >= 33:
+                        player_name = player_name[:30] + "..."
+                    players_description = players_description + f"`{player_name}` \n"
+                    score_description = score_description + f"`{player_dict['score']}` \n"
+                    time_played = math.floor(player_dict['duration']/60)
+                    if time_played >= 60:
+                        time_played = f"{round(player_dict['duration']/60/60, 1)} Hours"
+                    else: 
+                        time_played = f"{math.floor(player_dict['duration']/60)} Minutes"
+                    time_played_description = time_played_description + f"`{time_played}` \n"
+                
+            except Exception as e:
+                players_description = ""
+                score_description = ""
+                time_played_description = ""
+
+            if len(a2s_players):
+                embed.add_field(name=f"Players", value=players_description, inline=True)
+                embed.add_field(name=f"Score", value=score_description, inline=True)
+                embed.add_field(name=f"Time Played", value=time_played_description, inline=True)
+
+            if server_modpack:
+                pass
+
+            embed.set_footer(text=f"Connect via {server_ip}:{server_port}")
+
+        else: #Offline...
+            embed = discord.Embed(title=server_name, description=f"Offline", color=0xE02B2B, timestamp=datetime.datetime.utcnow())
+    
+        return embed
+
+    @update_server_status.before_loop
+    async def before_update_server_status(self) -> None:
+        """
+        Cheeck if bot is ready before running the server status refreshes.
+        """
+        await self.wait_until_ready()
+
+
+
 
 
 load_dotenv()

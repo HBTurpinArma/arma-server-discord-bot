@@ -12,7 +12,6 @@ class Owner(commands.Cog, name="owner"):
         name="sync",
         description="Synchonizes the slash commands.",
     )
-    @app_commands.describe(scope="The scope of the sync. Can be `global` or `guild`")
     @commands.is_owner()
     async def sync(self, context: Context, scope: str) -> None:
         """
@@ -47,9 +46,6 @@ class Owner(commands.Cog, name="owner"):
     @commands.command(
         name="unsync",
         description="Unsynchonizes the slash commands.",
-    )
-    @app_commands.describe(
-        scope="The scope of the sync. Can be `global`, `current_guild` or `guild`"
     )
     @commands.is_owner()
     async def unsync(self, context: Context, scope: str) -> None:
@@ -87,7 +83,6 @@ class Owner(commands.Cog, name="owner"):
         name="load",
         description="Load a cog",
     )
-    @app_commands.describe(cog="The name of the cog to load")
     @commands.is_owner()
     async def load(self, context: Context, cog: str) -> None:
         """
@@ -113,7 +108,6 @@ class Owner(commands.Cog, name="owner"):
         name="unload",
         description="Unloads a cog.",
     )
-    @app_commands.describe(cog="The name of the cog to unload")
     @commands.is_owner()
     async def unload(self, context: Context, cog: str) -> None:
         """
@@ -139,7 +133,6 @@ class Owner(commands.Cog, name="owner"):
         name="reload",
         description="Reloads a cog.",
     )
-    @app_commands.describe(cog="The name of the cog to reload")
     @commands.is_owner()
     async def reload(self, context: Context, cog: str) -> None:
         """
@@ -160,6 +153,21 @@ class Owner(commands.Cog, name="owner"):
             description=f"Successfully reloaded the `{cog}` cog.", color=0xBEBEFE
         )
         await context.send(embed=embed)
+
+    @commands.command(
+        name="shutdown",
+        description="Make the bot shutdown.",
+    )
+    @commands.is_owner()
+    async def shutdown(self, context: Context) -> None:
+        """
+        Shuts down the bot.
+
+        :param context: The hybrid command context.
+        """
+        embed = discord.Embed(description="Shutting down. Bye! :wave:", color=0xBEBEFE)
+        await context.send(embed=embed)
+        await self.bot.close()
 
 
 async def setup(bot) -> None:
