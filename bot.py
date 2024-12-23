@@ -168,8 +168,6 @@ class DiscordBot(commands.Bot):
             f"Running on: {platform.system()} {platform.release()} ({os.name})"
         )
         self.logger.info("-------------------")
-        
-        await self.grab_channels(1001559795310010539)
 
         #Setup server status db and updates, along with web panel integration
         await self.init_server_db()
