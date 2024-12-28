@@ -57,7 +57,7 @@ class Helper(commands.Cog, name="helper"):
 
         :param context: The hybrid command context.
         """
-        latest_reddit_url = await self.pull_recent_reddit_post_url("tawarmadivision")
+        latest_reddit_url = await pull_recent_reddit_post_url(self, "tawarmadivision")
         
         buttons = discord.ui.View()
         buttons.add_item(discord.ui.Button(label="Twitch", style=discord.ButtonStyle.link, url = 'https://www.twitch.tv/tawarmadivision'))
@@ -77,20 +77,20 @@ class Helper(commands.Cog, name="helper"):
             await context.send(content=f"**Be sure to like, share and follow our social media accounts!**\n Latest Reddit Post: {latest_reddit_url}\n", view=buttons, ephemeral=True)
 
 
-    async def pull_recent_reddit_post_url(self, username: str):
-        reddit = asyncpraw.Reddit(
-            client_id=self.bot.config['reddit']['id'],
-            client_secret=self.bot.config['reddit']['secret'],
-            user_agent="lookup latest submission by u/hbturpin"
-        )
+async def pull_recent_reddit_post_url(self, username: str):
+    reddit = asyncpraw.Reddit(
+        client_id=self.bot.config['reddit']['id'],
+        client_secret=self.bot.config['reddit']['secret'],
+        user_agent="lookup latest submission by u/hbturpin"
+    )
 
-        user = await reddit.redditor(username)
-        submissions = user.submissions.new(limit=1)
+    user = await reddit.redditor(username)
+    submissions = user.submissions.new(limit=1)
 
-        async for link in submissions:
-            return "https://www.reddit.com"+ link.permalink
-        else:
-            return 'https://www.reddit.com/user/tawarmadivision/'
+    async for link in submissions:
+        return "https://www.reddit.com"+ link.permalink
+    else:
+        return 'https://www.reddit.com/user/tawarmadivision/'
 
 
 
