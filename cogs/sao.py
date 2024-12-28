@@ -47,6 +47,25 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
         await self.post[1].add_reaction("👍")
         await self.post[1].add_reaction("👎")
 
+        #Post to the mod discussion page for people to see
+        mod_discussion_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
+        await mod_discussion_channel.send(
+            embed=discord.Embed(
+                description=f"<@{interaction.user.id}> has submitted a mod request: <#{self.post[1].id}>",
+                color=0xBEBEFE,
+            )
+        )
+
+        #Respond to the interaction
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>",
+                color=0xBEBEFE,
+            ),
+            ephemeral=True
+        )
+
+
         self.stop()
 
 
@@ -70,6 +89,15 @@ class BugReportModal(discord.ui.Modal, title="Bug Report Form"):
         forum_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['forum_channel_id']))
         tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['bug'])), forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
         self.post = await forum_channel.create_thread(name=f"Bug Report: {self.answer_title}", applied_tags=tags, content=self.answer_post)
+
+        #Respond to the interaction
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                description=f"Thanks for your bug report, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>",
+                color=0xBEBEFE,
+            ),
+            ephemeral=True
+        )
 
         self.stop()
 
@@ -184,14 +212,6 @@ class ServerAdminOffice(commands.Cog, name="server"):
         await mod_request_modal.wait()
         interaction = mod_request_modal.interaction
 
-        # Post to the mod discussion
-        mod_discussion_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
-        await mod_discussion_channel.send(embed=discord.Embed(description=f"<@{interaction.user.id}> has submitted a new mod request: <#{mod_request_modal.post[0].id}>", color=0xBEBEFE, ))
-
-        # Respond to the interaction
-        await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{mod_request_modal.post[0].id}>", color=0xBEBEFE, ),
-            ephemeral=True)
-
     @app_commands.command(name="bug_report", description="Post a bug report to the server forum", )
     async def bug_report(self, interaction: discord.Interaction) -> None:
         # Return not configured error embed to interaction if executed in the wrong guild.
@@ -204,14 +224,6 @@ class ServerAdminOffice(commands.Cog, name="server"):
         await interaction.response.send_modal(bug_report_modal)
         await bug_report_modal.wait()
         interaction = bug_report_modal.interaction
-
-        # Post to the mod discussion
-        mod_discussion_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
-        await mod_discussion_channel.send(embed=discord.Embed(description=f"<@{interaction.user.id}> has submitted a bug report: <#{bug_report_modal.post[0].id}>", color=0xBEBEFE, ))
-
-        # Respond to the interaction
-        await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your bug report, the server admin office will review it soon. You can view it here: <#{bug_report_modal.post[0].id}>", color=0xBEBEFE, ),
-            ephemeral=True)
 
     param_server_id = "The 'nickname' or 'id' of the server in the web panel."
     param_server_type = "The type of server that should be referenced, options are 'arma3' or 'reforger'."
