@@ -146,6 +146,22 @@ class ServerAdminOffice(commands.Cog, name="server"):
     def __init__(self, bot) -> None:
         self.bot = bot
 
+    @commands.command(name="mod_info", description="Post information on a mod from the steam workshop.")
+    @commands.is_owner()
+    async def mod_info(self, context: Context, mod_id):
+        mod_info = await get_workshop_info(mod_id)
+
+        mod_title = mod_info["title"] if mod_info else ""
+        mod_size = mod_info["size"] if mod_info else ""
+        mod_description = mod_info["description"] if mod_info else ""
+        mod_link = mod_info["link"] if mod_info else ""
+
+        embed = discord.Embed(title=mod_title, description=mod_description[:1000], url=mod_link, color=0xBEBEFE)
+        embed.add_field(name="Size", value=mod_size, inline=False)
+        embed.add_field(name="Dependencies", value=mod_size, inline=False)
+        await context.send(embed=embed)
+
+
     @commands.command(name="sao_info", description="Post information embed for server based suggestions.")
     @commands.is_owner()
     async def sao_info(self, context: Context) -> None:
@@ -361,6 +377,63 @@ class ServerAdminOffice(commands.Cog, name="server"):
         else:
             embed = discord.Embed(title=f"Error", description=f"""Please try again or contact the server administrator.""", color=0xE02B2B)
         await context.send(embed=embed, ephemeral=True)
+
+
+async def get_workshop_link(mod_id):
+    return f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_id}"  # return f"https://steamcommunity.com/sharedfiles/filedetails/changelog/{mod_id}"
+
+async def get_workshop_info(mod_id) -> dict:
+    ##Start session and recieve HTML data.
+    async with aiohttp.ClientSession() as session:
+        async with session.get(await get_workshop_link(mod_id)) as response:
+            await session.close()
+            if response.status != 200:
+                return {}
+            response_text = await response.text()
+
+    if not response_text:
+        return {}
+
+    mod_info = {}
+    cleanhtml = re.compile('<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});')
+
+    ##Obtain mod title
+    title_pattern = re.compile(r'<title>(.*?)</title>', re.DOTALL)
+    title_match = title_pattern.search(response_text)
+    if title_match:
+        clean_title = re.sub(cleanhtml, '', title_match.group(1))
+        mod_info['title'] = clean_title.strip()
+    else:
+        mod_info['title'] = 'Unknown'
+
+    ##Obtain mod description
+    description_pattern = re.compile(r'<div class="workshopItemDescription"[^>]*>(.*?)</div>', re.DOTALL)
+    description_match = description_pattern.search(response_text)
+    if description_match:
+        description_text = re.sub(cleanhtml, '', description_match.group(1))
+        description_text = description_text.replace("<br>", "\n").strip()
+        # Optionally, replace multiple spaces with a single space for readability
+        description_text = re.sub(r'\s+', ' ', description_text)
+        mod_info['description'] = description_text
+    else:
+        mod_info['description'] = ""
+
+    ##Obtain mod size
+    size_pattern = re.compile(r"detailsStatsContainerRight.*?<div .*?\>(.*?)</div>", re.DOTALL)
+    size_match = size_pattern.search(response_text)
+    if size_match:
+        string_size = re.sub(cleanhtml, '', size_match.group(1).replace("<br>", "\n").replace("</b>", "\n"))
+        clean_number = float(string_size[:-3])
+        if "KB" in string_size:
+            mod_info['size'] = str(round(clean_number / 1000000, 5))
+        elif "MB" in string_size:
+            mod_info['size'] = str(round(clean_number / 1000, 5))
+        elif "GB" in string_size:
+            mod_info['size'] = str(round(clean_number / 1, 5))
+        else:
+            mod_info['size'] = "0"
+    else:
+        mod_info['size'] = "-"
 
 
 async def get_user_authentication(self, user_id: str, guild_id: str, server_type: str = "arma3") -> None:
