@@ -1,16 +1,63 @@
 {
   "prefix": "",
-  "invite_link": "",
   "arma_server_web_admin" : {
     "arma3" : {
       "address": "",
       "public_username": "",
       "public_password": ""
     },
-    "reforger" : {
+    "am2" : {
       "address": "",
       "public_username": "",
       "public_password": ""
+    },
+    "am1" : {
+      "address": "",
+      "public_username": "",
+      "public_password": ""
+    },
+
+  },
+  "taw": {
+    "address":"",
+    "user_api":""
+  },
+  "reddit": {
+    "secret": "",
+    "id": ""
+  },
+  "discord": {
+    "guild_id": 1111111111111111111,
+    "invite_link": "https://discord.com/oauth2/authorize?client_id=1111111111111111111",
+    "server_admin_office": {
+      "channel_id": 1111111111111111111,
+      "suggestion_channel_id": 1111111111111111111,
+      "forum_channel_id": 1111111111111111111,
+      "forum_moderators": [1111111111111111111],
+      "forum_tags": {
+        "serverside": 1111111111111111111,
+        "clientside": 1111111111111111111,
+        "map": 1111111111111111111,
+        "bug": 1111111111111111111,
+        "suggestion": 1111111111111111111,
+        "pending_testing": 1111111111111111111,
+        "pending_review": 1111111111111111111,
+        "closed": 1111111111111111111,
+        "approved": 1111111111111111111,
+        "rejected": 1111111111111111111
+      }
+    },
+    "recruitment_headquarters": {
+      "channel_id": 1111111111111111111
+    },
+    "combat_training_centre": {
+      "channel_id": 1111111111111111111
+    },
+    "field_specialist_office": {
+      "channel_id": 1111111111111111111
+    },
+    "mission_development": {
+      "channel_id": 1111111111111111111
     }
   }
 }
