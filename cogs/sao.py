@@ -3,6 +3,8 @@ from discord import app_commands
 from discord.ext.commands import Context
 import discord
 import base64
+import re
+import aiohttp
 
 
 class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
@@ -18,24 +20,9 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
         self.bot = bot
         self.mod_type = mod_type
 
-    mod_title = discord.ui.TextInput(
-        style=discord.TextStyle.short,
-        label="Mod Title",
-        required=True,
-        placeholder="Mod"
-    )
-    mod_link = discord.ui.TextInput(
-        style=discord.TextStyle.short,
-        label="Steam Workshop Link",
-        required=True,
-        placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id="
-    )
-    mod_description = discord.ui.TextInput(
-        style=discord.TextStyle.long,
-        label="Mod Description",
-        required=True,
-        placeholder="Tell us about the mod, what does it do, why would it benefit us having it?"
-    )
+    mod_title = discord.ui.TextInput(style=discord.TextStyle.short, label="Mod Title", required=True, placeholder="Mod")
+    mod_link = discord.ui.TextInput(style=discord.TextStyle.short, label="Steam Workshop Link", required=True, placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=")
+    mod_description = discord.ui.TextInput(style=discord.TextStyle.long, label="Mod Description", required=True, placeholder="Tell us about the mod, what does it do, why would it benefit us having it?")
 
     async def on_submit(self, interaction: discord.Interaction):
         self.interaction = interaction
@@ -48,20 +35,15 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
         self.answer_post = f"||{mentions}||\n# {self.answer_title}\n{self.mod_link}\n### Description\n{self.mod_description}\n\n-# Please react and discuss the requested mod below, the server admin office will prioritise mods which have the most interest. You can show interest by reacting to this post.\n"
 
         forum_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['forum_channel_id']))
-        tags = [forum_channel.get_tag(
-            int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
+        tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
         if self.mod_type == 1:
-            tags.append(forum_channel.get_tag(
-                int(self.bot.config['discord']['server_admin_office']['forum_tags']['serverside'])))
+            tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['serverside'])))
         elif self.mod_type == 2:
-            tags.append(forum_channel.get_tag(
-                int(self.bot.config['discord']['server_admin_office']['forum_tags']['clientside'])))
+            tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['clientside'])))
         elif self.mod_type == 3:
-            tags.append(
-                forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['map'])))
+            tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['map'])))
 
-        self.post = await forum_channel.create_thread(name=f"Mod Request: {self.answer_title}", applied_tags=tags,
-                                                      content=self.answer_post)
+        self.post = await forum_channel.create_thread(name=f"Mod Request: {self.answer_title}", applied_tags=tags, content=self.answer_post)
         await self.post[1].add_reaction("👍")
         await self.post[1].add_reaction("👎")
 
@@ -73,18 +55,8 @@ class BugReportModal(discord.ui.Modal, title="Bug Report Form"):
         super().__init__(title="Bug Report Form")
         self.bot = bot
 
-    bug_title = discord.ui.TextInput(
-        style=discord.TextStyle.short,
-        label="Bug Title",
-        required=True,
-        placeholder=""
-    )
-    bug_description = discord.ui.TextInput(
-        style=discord.TextStyle.long,
-        label="Bug Description",
-        required=True,
-        placeholder="Tell us about the bug, what issue is happening, how does it happen? Any steps to reproduce?"
-    )
+    bug_title = discord.ui.TextInput(style=discord.TextStyle.short, label="Bug Title", required=True, placeholder="")
+    bug_description = discord.ui.TextInput(style=discord.TextStyle.long, label="Bug Description", required=True, placeholder="Tell us about the bug, what issue is happening, how does it happen? Any steps to reproduce?")
 
     async def on_submit(self, interaction: discord.Interaction):
         self.interaction = interaction
@@ -96,11 +68,8 @@ class BugReportModal(discord.ui.Modal, title="Bug Report Form"):
         self.answer_post = f"||{mentions}||\n# {self.answer_title}\n### Description\n{self.answer_description}\n\n-# If you have any evidence or further information, please post it below. The server admin office will look to resolve the issue as soon as possible.\n"
 
         forum_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['forum_channel_id']))
-        tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['bug'])),
-                forum_channel.get_tag(
-                    int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
-        self.post = await forum_channel.create_thread(name=f"Bug Report: {self.answer_title}", applied_tags=tags,
-                                                      content=self.answer_post)
+        tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['bug'])), forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
+        self.post = await forum_channel.create_thread(name=f"Bug Report: {self.answer_title}", applied_tags=tags, content=self.answer_post)
 
         self.stop()
 
@@ -118,8 +87,7 @@ class StartStopButtonSelection(discord.ui.View):
         for server_id in server_list:
             self.server_options.append(discord.SelectOption(label=server_id))
 
-    @discord.ui.select(placeholder="server_id", min_values=1, max_values=1, options=server_options,
-                       custom_id="server_select")
+    @discord.ui.select(placeholder="server_id", min_values=1, max_values=1, options=server_options, custom_id="server_select")
     async def serverSelect(self, interaction: discord.Integration, select: discord.ui.Select):
         await interaction.response.defer()
         self.server_id = select.values[0]
@@ -143,13 +111,9 @@ class StartStopButton(discord.ui.View):
         self.server_type = server_type
         self.message_context = message_context
 
-    # @discord.ui.button(label="Start", style=discord.ButtonStyle.green, custom_id="server_start")
-    # async def serverStartButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-    #     await ServerAdminOffice.server_start(self.server, self.message_context, self.server_id, "arma3")
+    # @discord.ui.button(label="Start", style=discord.ButtonStyle.green, custom_id="server_start")  # async def serverStartButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_start(self.server, self.message_context, self.server_id, "arma3")
 
-    # @discord.ui.button(label="Stop", style=discord.ButtonStyle.red, custom_id="server_stop")
-    # async def serverStopButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-    #     await ServerAdminOffice.server_stop(self.server, self.message_context, self.server_id, "arma3")
+    # @discord.ui.button(label="Stop", style=discord.ButtonStyle.red, custom_id="server_stop")  # async def serverStopButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_stop(self.server, self.message_context, self.server_id, "arma3")
 
 
 class ServerForumButton(discord.ui.View):
@@ -157,14 +121,12 @@ class ServerForumButton(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="Request Serverside Mod", style=discord.ButtonStyle.blurple,
-                       custom_id='sao_info:mod_suggest_serverside')
+    @discord.ui.button(label="Request Serverside Mod", style=discord.ButtonStyle.blurple, custom_id='sao_info:mod_suggest_serverside')
     async def modRequestServerButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         mod_request_modal = ModRequestModal(self.bot, 1)
         await interaction.response.send_modal(mod_request_modal)
 
-    @discord.ui.button(label="Request Clientside Mod", style=discord.ButtonStyle.blurple,
-                       custom_id='sao_info:mod_suggest_clientside')
+    @discord.ui.button(label="Request Clientside Mod", style=discord.ButtonStyle.blurple, custom_id='sao_info:mod_suggest_clientside')
     async def modRequestClientButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         mod_request_modal = ModRequestModal(self.bot, 2)
         await interaction.response.send_modal(mod_request_modal)
@@ -187,22 +149,12 @@ class ServerAdminOffice(commands.Cog, name="server"):
     @commands.command(name="sao_info", description="Post information embed for server based suggestions.")
     @commands.is_owner()
     async def sao_info(self, context: Context) -> None:
-
-        embed = discord.Embed(title="Ingame Forums",
-                              description="If you have any mod suggestions, bug reports or want to discuss anything please use the buttons below or the following commands.\n\n`/mod_request` if you want suggest any new mods/maps to be used in the unit\n`/bug_report` if you want to report any issues from ingame\n\nYou are free to create new posts as discussions directly in the forum channel if there's any specific ingame settings you want to discuss.",
-                              color=0xBEBEFE)
+        embed = discord.Embed(title="Ingame Forums", description="If you have any mod suggestions, bug reports or want to discuss anything please use the buttons below or the following commands.\n\n`/mod_request` if you want suggest any new mods/maps to be used in the unit\n`/bug_report` if you want to report any issues from ingame\n\nYou are free to create new posts as discussions directly in the forum channel if there's any specific ingame settings you want to discuss.", color=0xBEBEFE)
         await context.send(embed=embed, view=ServerForumButton(self.bot))
 
-    @app_commands.command(
-        name="mod_request",
-        description="Post a mod suggestion to the server forum",
-    )
+    @app_commands.command(name="mod_request", description="Post a mod suggestion to the server forum", )
     @app_commands.describe(type="Type of mod to suggest")
-    @app_commands.choices(type=[
-        discord.app_commands.Choice(name="Serverside", value=1),
-        discord.app_commands.Choice(name="Clientside", value=2),
-        discord.app_commands.Choice(name="Map", value=3),
-    ])
+    @app_commands.choices(type=[discord.app_commands.Choice(name="Serverside", value=1), discord.app_commands.Choice(name="Clientside", value=2), discord.app_commands.Choice(name="Map", value=3)])
     async def mod_request(self, interaction: discord.Interaction, type: discord.app_commands.Choice[int]) -> None:
 
         # Return not configured error embed to interaction if executed in the wrong guild.
@@ -217,28 +169,14 @@ class ServerAdminOffice(commands.Cog, name="server"):
         interaction = mod_request_modal.interaction
 
         # Post to the mod discussion
-        mod_discussion_channel = self.bot.get_channel(
-            int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
-        await mod_discussion_channel.send(
-            embed=discord.Embed(
-                description=f"<@{interaction.user.id}> has submitted a new mod request: <#{mod_request_modal.post[0].id}>",
-                color=0xBEBEFE,
-            )
-        )
+        mod_discussion_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
+        await mod_discussion_channel.send(embed=discord.Embed(description=f"<@{interaction.user.id}> has submitted a new mod request: <#{mod_request_modal.post[0].id}>", color=0xBEBEFE, ))
 
         # Respond to the interaction
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{mod_request_modal.post[0].id}>",
-                color=0xBEBEFE,
-            ),
-            ephemeral=True
-        )
+        await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{mod_request_modal.post[0].id}>", color=0xBEBEFE, ),
+            ephemeral=True)
 
-    @app_commands.command(
-        name="bug_report",
-        description="Post a bug report to the server forum",
-    )
+    @app_commands.command(name="bug_report", description="Post a bug report to the server forum", )
     async def bug_report(self, interaction: discord.Interaction) -> None:
         # Return not configured error embed to interaction if executed in the wrong guild.
         if interaction.guild.id != self.bot.config['discord']['guild_id']:
@@ -252,31 +190,17 @@ class ServerAdminOffice(commands.Cog, name="server"):
         interaction = bug_report_modal.interaction
 
         # Post to the mod discussion
-        mod_discussion_channel = self.bot.get_channel(
-            int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
-        await mod_discussion_channel.send(
-            embed=discord.Embed(
-                description=f"<@{interaction.user.id}> has submitted a bug report: <#{bug_report_modal.post[0].id}>",
-                color=0xBEBEFE,
-            )
-        )
+        mod_discussion_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
+        await mod_discussion_channel.send(embed=discord.Embed(description=f"<@{interaction.user.id}> has submitted a bug report: <#{bug_report_modal.post[0].id}>", color=0xBEBEFE, ))
 
         # Respond to the interaction
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                description=f"Thanks for your bug report, the server admin office will review it soon. You can view it here: <#{bug_report_modal.post[0].id}>",
-                color=0xBEBEFE,
-            ),
-            ephemeral=True
-        )
+        await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your bug report, the server admin office will review it soon. You can view it here: <#{bug_report_modal.post[0].id}>", color=0xBEBEFE, ),
+            ephemeral=True)
 
     param_server_id = "The 'nickname' or 'id' of the server in the web panel."
     param_server_type = "The type of server that should be referenced, options are 'arma3' or 'reforger'."
 
-    @commands.hybrid_command(
-        name="server_start",
-        description="Start a specific server using the server id reference.",
-    )
+    @commands.hybrid_command(name="server_start", description="Start a specific server using the server id reference.", )
     @app_commands.describe(server_id=param_server_id, server_type=param_server_type)
     # @app_commands.choices(server_type=[
     #     discord.app_commands.Choice(name="Arma3", value="arma3"),
@@ -290,11 +214,9 @@ class ServerAdminOffice(commands.Cog, name="server"):
         :param server_id: The server ID which should be started.
         :param server_type: The server address which should be referenced.
         """
-        response = await self.bot.arma_server_web_admin.server_start(context.author.id, context.guild.id, server_type,
-                                                                     server_id)
+        response = await self.bot.arma_server_web_admin.server_start(context.author.id, context.guild.id, server_type, server_id)
         if response.status == 200:
-            embed = discord.Embed(title="Server Started", description=f"The server (`{server_id}`) has been started.",
-                                  color=0xBEBEFE)
+            embed = discord.Embed(title="Server Started", description=f"The server (`{server_id}`) has been started.", color=0xBEBEFE)
             embed.set_footer(text=f"{response.url}")
             await context.send(embed=embed, ephemeral=True)
         elif response.status == 401:
@@ -310,10 +232,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
             embed.set_footer(text=f"{response.url}")
             await context.send(embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(
-        name="server_stop",
-        description=" Stop a specific server using the server id reference.",
-    )
+    @commands.hybrid_command(name="server_stop", description=" Stop a specific server using the server id reference.", )
     @app_commands.describe(server_id=param_server_id, server_type=param_server_type)
     async def server_stop(self, context: Context, server_id: str, server_type: str = "arma3") -> None:
         """
@@ -322,11 +241,9 @@ class ServerAdminOffice(commands.Cog, name="server"):
         :param context: The hybrid command context.
         :param server_id: The server which should be started.
         """
-        response = await self.bot.arma_server_web_admin.server_stop(context.author.id, context.guild.id, server_type,
-                                                                    server_id)
+        response = await self.bot.arma_server_web_admin.server_stop(context.author.id, context.guild.id, server_type, server_id)
         if response.status == 200:
-            embed = discord.Embed(title="Server Stopped", description=f"The server (`{server_id}`) has been stopped.",
-                                  color=0xBEBEFE)
+            embed = discord.Embed(title="Server Stopped", description=f"The server (`{server_id}`) has been stopped.", color=0xBEBEFE)
             embed.set_footer(text=f"{response.url}")
             await context.send(embed=embed, ephemeral=True)
         elif response.status == 401:
@@ -342,14 +259,9 @@ class ServerAdminOffice(commands.Cog, name="server"):
             embed.set_footer(text=f"{response.url}")
             await context.send(embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(
-        name="server_upload",
-        description="Upload a .pbo mission file directly to the server.",
-    )
-    @app_commands.describe(mission_pbo="The .pbo file for mission you wish to upload to the server.",
-                           server_type=param_server_type)
-    async def server_mission_upload(self, context: Context, mission_pbo: discord.Attachment,
-                                    server_type: str = "arma3") -> None:
+    @commands.hybrid_command(name="server_upload", description="Upload a .pbo mission file directly to the server.", )
+    @app_commands.describe(mission_pbo="The .pbo file for mission you wish to upload to the server.", server_type=param_server_type)
+    async def server_mission_upload(self, context: Context, mission_pbo: discord.Attachment, server_type: str = "arma3") -> None:
         """
         Upload a .pbo mission file directly to the server.
 
@@ -359,10 +271,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
 
         pass
 
-    @commands.hybrid_command(
-        name="server_list",
-        description="List the available server_ids on the web panel.",
-    )
+    @commands.hybrid_command(name="server_list", description="List the available server_ids on the web panel.", )
     @app_commands.describe(server_type=param_server_type)
     async def server_list(self, context: Context, server_type: str = "arma3") -> None:
         """
@@ -370,8 +279,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
 
         :param context: The hybrid command context.
         """
-        response = await self.bot.arma_server_web_admin.get_server_config(context.author.id, context.guild.id,
-                                                                          server_type)
+        response = await self.bot.arma_server_web_admin.get_server_config(context.author.id, context.guild.id, server_type)
         if response.status == 200 and response.json_content:
             server_list = []
             server_ids = ""
@@ -386,9 +294,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
             embed.add_field(name=f"ID", value=server_ids, inline=True)
             embed.add_field(name=f"Name", value=server_names, inline=True)
             embed.add_field(name=f"Port", value=server_ports, inline=True)
-            await context.send(embed=embed, ephemeral=True,
-                               view=StartStopButtonSelection(self, message_context=context, server_type=server_type,
-                                                             server_list=server_list))
+            await context.send(embed=embed, ephemeral=True, view=StartStopButtonSelection(self, message_context=context, server_type=server_type, server_list=server_list))
         elif response.status == 401:
             embed = await unauthorised_embed(self)
             embed.set_footer(text=f"{response.url}")
@@ -398,44 +304,28 @@ class ServerAdminOffice(commands.Cog, name="server"):
             embed.set_footer(text=f"{response.url}")
             await context.send(embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(
-        name="server_status",
-        description="Get the current server status of a specific server_id or setup a info message for the public to see.",
-    )
-    @app_commands.describe(server_id=param_server_id, server_type=param_server_type,
-                           status_channel="Setup a auto status message in a specified channel.",
-                           server_ip="Override the IP to point at a specific address rather than localhost.",
-                           server_description="Any additional information you want to include in the server status.",
-                           server_modpack="A link to the modpack used for the server.")
-    async def server_status(self, context: Context, server_id: str, server_type: str = "arma3",
-                            status_channel: discord.TextChannel = None, message_id: str = "",
-                            server_ip: str = "am2.taw.net", server_description: str = "",
+    @commands.hybrid_command(name="server_status", description="Get the current server status of a specific server_id or setup a info message for the public to see.", )
+    @app_commands.describe(server_id=param_server_id, server_type=param_server_type, status_channel="Setup a auto status message in a specified channel.", server_ip="Override the IP to point at a specific address rather than localhost.",
+                           server_description="Any additional information you want to include in the server status.", server_modpack="A link to the modpack used for the server.")
+    async def server_status(self, context: Context, server_id: str, server_type: str = "arma3", status_channel: discord.TextChannel = None, message_id: str = "", server_ip: str = "am2.taw.net", server_description: str = "",
                             server_modpack: str = "") -> None:
         """
         Get the current server status of a specific server_id or setup a info message for the public to see.
 
         :param context: The hybrid command context.
         """
-        response = await self.bot.arma_server_web_admin.get_server_config(context.author.id, context.guild.id,
-                                                                          server_type, server_id)
+        response = await self.bot.arma_server_web_admin.get_server_config(context.author.id, context.guild.id, server_type, server_id)
         if response.status == 200:
             server = response.json_content
             if not server is None:
-                status_embed = await self.bot.server_status_embed(server_id, server_type, server_ip, server['port'],
-                                                                  server["title"], server_description, server_modpack)
+                status_embed = await self.bot.server_status_embed(server_id, server_type, server_ip, server['port'], server["title"], server_description, server_modpack)
                 if status_channel:  # Add status message to database to keep track.
                     if not message_id:
                         message = await status_channel.send("Querying the servers....")
                         message_id = message.id
-                    response = await self.bot.database.add_server_status(context.guild.id, status_channel.id,
-                                                                         message_id, context.author.id, server_id,
-                                                                         server_type, server_ip, server['port'],
-                                                                         server["title"], server_description,
-                                                                         server_modpack)
+                    response = await self.bot.database.add_server_status(context.guild.id, status_channel.id, message_id, context.author.id, server_id, server_type, server_ip, server['port'], server["title"], server_description, server_modpack)
                     if response:
-                        await context.send(
-                            f"The status message ({message_id}) has been setup in {status_channel} sucessfully, sending update...",
-                            ephemeral=True)
+                        await context.send(f"The status message ({message_id}) has been setup in {status_channel} sucessfully, sending update...", ephemeral=True)
                     # This update takes too long to send back to the interaction, can maybe call this back/defer. One for later maybe.
                     await self.bot.update_server_status_message(context.guild.id, status_channel.id, message_id)
                 else:  # Just post current snapshot back to context
@@ -452,10 +342,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
             status_embed.set_footer(text=f"{response.url}")
             await context.send(embed=status_embed, ephemeral=True)
 
-    @commands.hybrid_command(
-        name="server_login",
-        description="Setup your web panel information in discord so you can use the server commands.",
-    )
+    @commands.hybrid_command(name="server_login", description="Setup your web panel information in discord so you can use the server commands.", )
     @app_commands.describe(server_type=param_server_type)
     async def server_login(self, context: Context, username: str, password: str, server_type: str = "arma3") -> None:
         """
@@ -470,13 +357,9 @@ class ServerAdminOffice(commands.Cog, name="server"):
         guild_id = context.guild.id
         response = await self.bot.database.set_server_authentication(user_id, guild_id, server_type, username, password)
         if response:
-            embed = discord.Embed(
-                description=f"Your webpanel authentication has been setup with {user_id}, {guild_id}, {server_type}, {username}, {password}.",
-                color=0xBEBEFE)
+            embed = discord.Embed(description=f"Your webpanel authentication has been setup with {user_id}, {guild_id}, {server_type}, {username}, {password}.", color=0xBEBEFE)
         else:
-            embed = discord.Embed(title=f"Error",
-                                  description=f"""Please try again or contact the server administrator.""",
-                                  color=0xE02B2B)
+            embed = discord.Embed(title=f"Error", description=f"""Please try again or contact the server administrator.""", color=0xE02B2B)
         await context.send(embed=embed, ephemeral=True)
 
 
@@ -487,37 +370,21 @@ async def get_user_authentication(self, user_id: str, guild_id: str, server_type
 
 
 async def unauthorised_embed(self):
-    return discord.Embed(
-        title=f"Unauthorised Access",
-        description=f"""Your login details for the web panel are either incorrect or you do not have the required permissions.
+    return discord.Embed(title=f"Unauthorised Access", description=f"""Your login details for the web panel are either incorrect or you do not have the required permissions.
         You can use /server_login [username] [password] to set up your details to use this bot.
-        """,
-        color=0xE02B2B,
-    )
+        """, color=0xE02B2B, )
 
 
 async def error_embed(self, response):
-    return discord.Embed(
-        title=f"{response.reason} ({response.status})",
-        description=f"{response.content}",
-        color=0xE02B2B,
-    )
+    return discord.Embed(title=f"{response.reason} ({response.status})", description=f"{response.content}", color=0xE02B2B, )
 
 
 async def server_not_exist_embed(self, server_id=""):
-    return discord.Embed(
-        title=f"`{server_id}` Not Found",
-        description=f"Use /server_list to see the available servers.",
-        color=0xE02B2B,
-    )
+    return discord.Embed(title=f"`{server_id}` Not Found", description=f"Use /server_list to see the available servers.", color=0xE02B2B, )
 
 
 async def not_configured_embed(self):
-    return discord.Embed(
-        title=f"Command Unavailable",
-        description=f"This command hasn't been configured for this server yet, please try again later.",
-        color=0xFF2B2B,
-    )
+    return discord.Embed(title=f"Command Unavailable", description=f"This command hasn't been configured for this server yet, please try again later.", color=0xFF2B2B, )
 
 
 async def setup(bot) -> None:
