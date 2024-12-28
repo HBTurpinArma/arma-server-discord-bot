@@ -30,7 +30,9 @@ class ArmaServerWebAdmin:
                         response.json_content = await response.json()
                     else:
                         response.json_content = []
+                    await session.close()
                     return response
+
         else: #Get all servers
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.config['arma_server_web_admin'][server_type]['address']}api/servers/", headers={'Authorization': "Basic %s" % basic_auth}) as response:
@@ -38,12 +40,15 @@ class ArmaServerWebAdmin:
                         response.json_content = await response.json()
                     else:
                         response.json_content = []
+                    await session.close()
                     return response
+
 
     async def server_start(self, user_id: str, guild_id: str, server_type: str="arma3", server_id: str=""):
         basic_auth = await self.get_user_authentication(user_id, guild_id, server_type)
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{self.config['arma_server_web_admin'][server_type]['address']}api/servers/{server_id}/start", headers={'Authorization': "Basic %s" % basic_auth}) as response:
+                await session.close()
                 return response
 
     async def server_stop(self, user_id: str, guild_id: str, server_type: str="arma3", server_id: str=""):
@@ -51,12 +56,14 @@ class ArmaServerWebAdmin:
         async with aiohttp.ClientSession() as session:
             api = f"{self.config['arma_server_web_admin'][server_type]['address']}api/servers/{server_id}/stop"
             async with session.post(api, headers={'Authorization': "Basic %s" % basic_auth}) as response:
+                await session.close()
                 return response
                 
     async def mission_upload(self, user_id: str, guild_id: str, server_type: str="arma3", pbo_upload = None):
-        return None
+        return None ##Still a WIP
         basic_auth = await self.get_user_authentication(user_id, guild_id, server_type)
         async with aiohttp.ClientSession() as session:
+            await session.close()
             pass
 
 class ArmaServerDatabaseManager:

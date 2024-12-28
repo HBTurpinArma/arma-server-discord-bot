@@ -52,25 +52,30 @@ async def scrape_bio_text(taw_username):
             bio_div = soup.find("div", id="dossierbio")
             print("bio_div:",bio_div)
             if not bio_div:
+                await session.close()
                 return None
             
             # Locate the <h2> and ensure it contains "Bio:"
             bio_header = bio_div.find("h2", text="Bio:")
             print("bio_header:",bio_header)
             if not bio_header:
+                await session.close()
                 return None
             
             # Locate the <p> tag and the <code> tag inside it
             bio_paragraph = bio_div.find("p")
             print("bio_para:",bio_paragraph)
             if not bio_paragraph:
+                await session.close()
                 return None
             
             code_tag = bio_paragraph.find("code", class_="inline")
             print("code_tag:",code_tag)
             if not code_tag:
+                await session.close()
                 return None
             
             # Return the text within the <code> tag
+            await session.close()
             return code_tag.get_text(strip=True)
 
