@@ -5,6 +5,8 @@ import discord
 import base64
 import re
 import aiohttp
+from bs4 import BeautifulSoup
+from datetime import datetime
 
 
 class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
@@ -29,42 +31,47 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
         self.answer_title = str(self.mod_title)
         self.answer_link = str(self.mod_link)
         self.answer_description = str(self.mod_description)
-        mentions = f"<@{interaction.user.id}>"
-        for moderators in self.bot.config['discord']['server_admin_office']['forum_moderators']:
-            mentions += f" <@&{moderators}>"
-        self.answer_post = f"||{mentions}||\n# {self.answer_title}\n{self.mod_link}\n### Description\n{self.mod_description}\n\n-# Please react and discuss the requested mod below, the server admin office will prioritise mods which have the most interest. You can show interest by reacting to this post.\n"
 
-        forum_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['forum_channel_id']))
-        tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
-        if self.mod_type == 1:
-            tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['serverside'])))
-        elif self.mod_type == 2:
-            tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['clientside'])))
-        elif self.mod_type == 3:
-            tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['map'])))
+        # Ensure that link provided is a workshop mod...
+        pattern = r"https://steamcommunity\.com/sharedfiles/filedetails/\?id=(\d+)"
+        match = re.match(pattern, self.answer_link)
+        if match:
+            mod_id = match.group(1)
 
-        self.post = await forum_channel.create_thread(name=f"Mod Request: {self.answer_title}", applied_tags=tags, content=self.answer_post)
-        await self.post[1].add_reaction("👍")
-        await self.post[1].add_reaction("👎")
+            # Get users to mention, should be SAO + requester
+            mentions = f"<@{interaction.user.id}>"
+            for moderators in self.bot.config['discord']['server_admin_office']['forum_moderators']:
+                mentions += f" <@&{moderators}>"
+            self.answer_post = f"||{mentions}||\n# {self.answer_title}\n{self.mod_link}\n### Description\n{self.mod_description}\n\n-# Please react and discuss the requested mod below, the server admin office will prioritise mods which have the most interest. You can show interest by reacting to this post.\n"
 
-        #Post to the mod discussion page for people to see
-        mod_discussion_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
-        await mod_discussion_channel.send(
-            embed=discord.Embed(
-                description=f"<@{interaction.user.id}> has submitted a mod request: <#{self.post[1].id}>",
-                color=0xBEBEFE,
-            )
-        )
+            forum_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['forum_channel_id']))
+            tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
+            if self.mod_type == 1:
+                tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['serverside'])))
+            elif self.mod_type == 2:
+                tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['clientside'])))
+            elif self.mod_type == 3:
+                tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['map'])))
 
-        #Respond to the interaction
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>",
-                color=0xBEBEFE,
-            ),
-            ephemeral=True
-        )
+            self.post = await forum_channel.create_thread(name=f"Mod Request: {self.answer_title}", applied_tags=tags, content=self.answer_post)
+            await self.post[1].add_reaction("👍")
+            await self.post[1].add_reaction("👎")
 
+            # Post to the mod discussion page for people to see
+            mod_discussion_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['suggestion_channel_id']))
+            await mod_discussion_channel.send(embed=discord.Embed(description=f"<@{interaction.user.id}> has submitted a mod request: <#{self.post[1].id}>", color=0xBEBEFE, ))
+
+            # Respond to the interaction
+            await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>", color=0xBEBEFE, ),
+                ephemeral=True)
+
+            # Send extra message in thread for workshop item info...
+            embed, buttons = await get_workshop_embed(mod_id)
+            await self.post[0].send(embed=embed, view=buttons)
+
+        else:
+            await interaction.response.send_message(
+                embed=discord.Embed(description=f"The request has not be posted, you must provide a correct workshop link (https://steamcommunity.com/sharedfiles/filedetails/?id=XXXXXXXXXXX).", color=0xFF1111, ), ephemeral=True)
 
         self.stop()
 
@@ -90,14 +97,8 @@ class BugReportModal(discord.ui.Modal, title="Bug Report Form"):
         tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['bug'])), forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
         self.post = await forum_channel.create_thread(name=f"Bug Report: {self.answer_title}", applied_tags=tags, content=self.answer_post)
 
-        #Respond to the interaction
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                description=f"Thanks for your bug report, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>",
-                color=0xBEBEFE,
-            ),
-            ephemeral=True
-        )
+        # Respond to the interaction
+        await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your bug report, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>", color=0xBEBEFE, ), ephemeral=True)
 
         self.stop()
 
@@ -177,23 +178,15 @@ class ServerAdminOffice(commands.Cog, name="server"):
     @commands.command(name="mod_info", description="Post information on a mod from the steam workshop.")
     @commands.is_owner()
     async def mod_info(self, context: Context, mod_id):
-        mod_info = await get_workshop_info(mod_id)
-
-        mod_title = mod_info["title"] if mod_info else ""
-        mod_size = mod_info["size"] if mod_info else ""
-        mod_description = mod_info["description"] if mod_info else ""
-        mod_link = mod_info["link"] if mod_info else ""
-
-        embed = discord.Embed(title=mod_title, description=mod_description[:1000], url=mod_link, color=0xBEBEFE)
-        embed.add_field(name="Size", value=mod_size, inline=False)
-        embed.add_field(name="Dependencies", value=mod_size, inline=False)
-        await context.send(embed=embed)
-
+        embed, buttons = await get_workshop_embed(mod_id)
+        await context.send(embed=embed, view=buttons)
 
     @commands.command(name="sao_info", description="Post information embed for server based suggestions.")
     @commands.is_owner()
     async def sao_info(self, context: Context) -> None:
-        embed = discord.Embed(title="Ingame Forums", description="If you have any mod suggestions, bug reports or want to discuss anything please use the buttons below or the following commands.\n\n`/mod_request` if you want suggest any new mods/maps to be used in the unit\n`/bug_report` if you want to report any issues from ingame\n\nYou are free to create new posts as discussions directly in the forum channel if there's any specific ingame settings you want to discuss.", color=0xBEBEFE)
+        embed = discord.Embed(title="Ingame Forums",
+                              description="If you have any mod suggestions, bug reports or want to discuss anything please use the buttons below or the following commands.\n\n`/mod_request` if you want suggest any new mods/maps to be used in the unit\n`/bug_report` if you want to report any issues from ingame\n\nYou are free to create new posts as discussions directly in the forum channel if there's any specific ingame settings you want to discuss.",
+                              color=0xBEBEFE)
         await context.send(embed=embed, view=ServerForumButton(self.bot))
 
     @app_commands.command(name="mod_request", description="Post a mod suggestion to the server forum", )
@@ -351,7 +344,8 @@ class ServerAdminOffice(commands.Cog, name="server"):
                     if not message_id:
                         message = await status_channel.send("Querying the servers....")
                         message_id = message.id
-                    response = await self.bot.database.add_server_status(context.guild.id, status_channel.id, message_id, context.author.id, server_id, server_type, server_ip, server['port'], server["title"], server_description, server_modpack)
+                    response = await self.bot.database.add_server_status(context.guild.id, status_channel.id, message_id, context.author.id, server_id, server_type, server_ip, server['port'], server["title"], server_description,
+                                                                         server_modpack)
                     if response:
                         await context.send(f"The status message ({message_id}) has been setup in {status_channel} sucessfully, sending update...", ephemeral=True)
                     # This update takes too long to send back to the interaction, can maybe call this back/defer. One for later maybe.
@@ -391,61 +385,138 @@ class ServerAdminOffice(commands.Cog, name="server"):
         await context.send(embed=embed, ephemeral=True)
 
 
+async def get_workshop_embed(mod_id):
+    mod_info = await get_workshop_info(mod_id)
+
+    mod_title = mod_info["title"] if mod_info else "Unknown"
+    mod_size = mod_info["size"] if mod_info else ""
+    mod_description = mod_info["description"] if mod_info else "Mod not found... is it an incorrect workshop ID?"
+    mod_link = mod_info["link"] if mod_info else ""
+    mod_changelog = mod_info["changelog"] if mod_info else ""
+    mod_dependencies = mod_info["dependencies"] if mod_info else ""
+    mod_logo = mod_info["logo"] if mod_info else ""
+    mod_last_updated = mod_info["last_updated"] if mod_info else ""
+
+    embed = discord.Embed(title=mod_title, description=mod_description[:1000] + "...", url=mod_link, color=0xBEBEFE)
+
+    # Add in size of mod field
+    embed.add_field(name="Size", value=mod_size, inline=False)
+
+    # Add in dependency field
+    dependency_str = ""
+    mod_count = len(mod_dependencies) + 1
+    for dep in mod_dependencies:
+        mod_count = mod_count - 1
+        if len(dependency_str + f"[{dep[0]}]({dep[1]})\n") > 900:
+            dependency_str = dependency_str + f"and {mod_count} more..."
+            break
+        else:
+            dependency_str = dependency_str + f"[{dep[0]}]({dep[1]})\n"
+    if mod_dependencies:
+        embed.add_field(name="Dependencies", value=dependency_str, inline=False)
+
+    # Add mod logo if its found
+    if mod_logo:
+        embed.set_thumbnail(url=mod_logo)
+
+    # Extra buttons
+    buttons = discord.ui.View()
+    buttons.add_item(discord.ui.Button(label="Workshop Page", style=discord.ButtonStyle.link, url=mod_link))
+    buttons.add_item(discord.ui.Button(label="Changelog", style=discord.ButtonStyle.link, url=mod_changelog))
+
+    # Last updated footer
+    if mod_last_updated:
+        embed.set_footer(text=f"Last Updated: {mod_last_updated}")
+
+    return embed, buttons
+
+
 async def get_workshop_link(mod_id):
-    return f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_id}"  # return f"https://steamcommunity.com/sharedfiles/filedetails/changelog/{mod_id}"
+    return f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_id}"
+
+
+async def get_workshop_changelog_link(mod_id):
+    return f"https://steamcommunity.com/sharedfiles/filedetails/changelog/{mod_id}"
+
+
+async def get_workshop_version(mod_id):
+    PATTERN = re.compile(r"workshopAnnouncement.*?<p id=\"(\d+)\">", re.DOTALL)
+    WORKSHOP_CHANGELOG_URL = "https://steamcommunity.com/sharedfiles/filedetails/changelog"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{WORKSHOP_CHANGELOG_URL}/{mod_id}") as response:
+            response_text = await response.text()
+            match = PATTERN.search(response_text)
+            if match:
+                return datetime.fromtimestamp(int(match.group(1)))
+    return datetime(1, 1, 1, 0, 0)
+
 
 async def get_workshop_info(mod_id) -> dict:
-    ##Start session and recieve HTML data.
+    # Start session and recieve HTML data.
     async with aiohttp.ClientSession() as session:
         async with session.get(await get_workshop_link(mod_id)) as response:
-            await session.close()
             if response.status != 200:
                 return {}
             response_text = await response.text()
+
+    await session.close()
 
     if not response_text:
         return {}
 
     mod_info = {}
     cleanhtml = re.compile('<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});')
+    soup = BeautifulSoup(response_text, 'html.parser')
 
-    ##Obtain mod title
-    title_pattern = re.compile(r'<title>(.*?)</title>', re.DOTALL)
-    title_match = title_pattern.search(response_text)
-    if title_match:
-        clean_title = re.sub(cleanhtml, '', title_match.group(1))
-        mod_info['title'] = clean_title.strip()
+    # Obtain mod title
+    title_tag = soup.find('title')
+    if title_tag:
+        mod_info['title'] = title_tag.text.strip()[16:]
     else:
         mod_info['title'] = 'Unknown'
 
-    ##Obtain mod description
-    description_pattern = re.compile(r'<div class="workshopItemDescription"[^>]*>(.*?)</div>', re.DOTALL)
-    description_match = description_pattern.search(response_text)
-    if description_match:
-        description_text = re.sub(cleanhtml, '', description_match.group(1))
-        description_text = description_text.replace("<br>", "\n").strip()
-        # Optionally, replace multiple spaces with a single space for readability
-        description_text = re.sub(r'\s+', ' ', description_text)
+    # Obtain mod description
+    description_div = soup.find('div', class_='workshopItemDescription')
+    if description_div:
+        # Get all text within the description div
+        description_text = description_div.get_text(separator='\n', strip=True)
+        # Optionally clean and format text
+        description_text = re.sub(r'\s+', ' ', description_text).replace('\n', '\n\n')  # Adjust spacing and line breaks
         mod_info['description'] = description_text
     else:
         mod_info['description'] = ""
 
-    ##Obtain mod size
+    # Obtain mod size
     size_pattern = re.compile(r"detailsStatsContainerRight.*?<div .*?\>(.*?)</div>", re.DOTALL)
     size_match = size_pattern.search(response_text)
     if size_match:
-        string_size = re.sub(cleanhtml, '', size_match.group(1).replace("<br>", "\n").replace("</b>", "\n"))
-        clean_number = float(string_size[:-3])
-        if "KB" in string_size:
-            mod_info['size'] = str(round(clean_number / 1000000, 5))
-        elif "MB" in string_size:
-            mod_info['size'] = str(round(clean_number / 1000, 5))
-        elif "GB" in string_size:
-            mod_info['size'] = str(round(clean_number / 1, 5))
-        else:
-            mod_info['size'] = "0"
+        mod_info['size'] = re.sub(cleanhtml, '', size_match.group(1).replace("<br>", "\n").replace("</b>", "\n"))
     else:
         mod_info['size'] = "-"
+
+    # Add on the link
+    mod_info['link'] = await get_workshop_link(mod_id)
+
+    # Add on the changelog link
+    mod_info['changelog'] = await get_workshop_changelog_link(mod_id)
+
+    # Obtain mod dependencies if any;
+    required_items_links = soup.find_all('a', {'data-subscribed': '0'})
+    required_items = [[item.find('div', class_='requiredItem').get_text(strip=True), item['href']] for item in required_items_links]
+    if required_items:
+        mod_info['dependencies'] = required_items
+    else:
+        mod_info['dependencies'] = []
+
+    # Obtain mod icon link from workshop:
+    icon_img_tag = soup.find('img', id='previewImageMain', class_='workshopItemPreviewImageMain')
+    mod_info['logo'] = icon_img_tag['src'] if icon_img_tag else None  # Get the 'src' of the img tag, or None if not found
+
+    # Obtain last updated date
+    mod_info['last_updated'] = await get_workshop_version(mod_id)
+
+    return mod_info
 
 
 async def get_user_authentication(self, user_id: str, guild_id: str, server_type: str = "arma3") -> None:
