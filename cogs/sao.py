@@ -167,7 +167,7 @@ class ServerForumButton(discord.ui.View):
 
     @discord.ui.button(label="Bug Report", style=discord.ButtonStyle.red, custom_id='sao_info:bug_report')
     async def bugReportButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        bug_report_modal = BugReportModal(self)
+        bug_report_modal = BugReportModal(self.bot)
         await interaction.response.send_modal(bug_report_modal)
 
 
