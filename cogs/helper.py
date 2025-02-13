@@ -30,7 +30,11 @@ class Helper(commands.Cog, name="helper"):
             battalion_info.add_field(name="Modpack", value="You will be prompted to download the mods when you join the server, this is only needed for Tuesday operations as Thursday's will be vanilla to allow our playstation players to join.", inline=False)
             battalion_info.add_field(name="Servers", value="- Operation | IP:``", inline=False)
 
-            await context.send(embeds=[taw_join_info, battalion_info], ephemeral=post)
+            if post:
+                await context.channel.send(embeds=[taw_join_info, battalion_info])
+                await context.send(content=f"Posted message to channel for everyone to see..", ephemeral=True)
+            else:
+                await context.send(embeds=[taw_join_info, battalion_info], ephemeral=True)
         elif battalion == "am2":
             battalion_info = discord.Embed(title="""2nd Battalion | Arma 3 | EU (AM2)""", description="""When signing up make sure you select the 2nd Battalion, once you've signed up be sure to reach out to an AM2 staff member who will be with you shortly.""", color=0xBEBEFE)
             battalion_info.add_field(name="Operation Times", value="- Thursday @ 19:30 UTC\n- Sunday @ 19:30 UTC", inline=False)
@@ -38,7 +42,11 @@ class Helper(commands.Cog, name="helper"):
             After subscribing, load it into your launcher and ensure all dependencies are subscribed to as well. Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
             battalion_info.add_field(name="Servers", value="- Operation | IP:`am2.taw.net:2302`\n- RNR | IP:`am2.taw.net:2602`\n- RHQ | IP:`am2.taw.net:2802`\n- CTC | IP:`am2.taw.net:2502`", inline=False)
 
-            await context.send(embeds=[taw_join_info, battalion_info], ephemeral=post)
+            if post:
+                await context.channel.send(embeds=[taw_join_info, battalion_info])
+                await context.send(content=f"Posted message to channel for everyone to see..", ephemeral=True)
+            else:
+                await context.send(embeds=[taw_join_info, battalion_info], ephemeral=True)
         elif battalion == "am3":
             battalion_info = discord.Embed(title="""3rd Battalion | Arma 3 | NA (AM3)""", description="""When signing up make sure you select the 3rd Battalion, once you've signed up be sure to reach out to an AM3 staff member who will be with you shortly.""", color=0xBEBEFE)
             battalion_info.add_field(name="Operation Times", value="- Sunday @ 19:00 EST", inline=False)
@@ -46,7 +54,11 @@ class Helper(commands.Cog, name="helper"):
             After subscribing, load it into your launcher and ensure all dependencies are subscribed to as well. Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
             battalion_info.add_field(name="Servers", value="- Operation | IP:`am3.taw.net:2302`", inline=False)
 
-            await context.send(embeds=[taw_join_info, battalion_info], ephemeral=post)
+            if post:
+                await context.channel.send(embeds=[taw_join_info, battalion_info])
+                await context.send(content=f"Posted message to channel for everyone to see..", ephemeral=True)
+            else:
+                await context.send(embeds=[taw_join_info, battalion_info], ephemeral=True)
         else:
             operations = discord.Embed(title="""Operation Times""", description="""Check out the operations schedule for each battalion below:""", color=0xBEBEFE)
             operations.add_field(name="1st Battalion | Arma Reforger | EU (AM1)", value="- Tuesday @ 19:30 UTC\n- Thursday @ 19:30 UTC", inline=False)
@@ -58,7 +70,13 @@ class Helper(commands.Cog, name="helper"):
             mods.add_field(name="2nd Battalion | Arma 3 | EU (AM2)", value="You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2293037577), once subscribed just load it into your launcher and subscribe to all the dependencies.", inline=False)
             mods.add_field(name="3rd Battalion | Arma 3 | NA (AM3)", value="You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3395507935), once subscribed just load it into your launcher and subscribe to all the dependencies.", inline=False)
 
-            await context.send(embeds=[taw_join_info, operations, mods], ephemeral=post)
+            if post:
+                await context.channel.send(embeds=[taw_join_info, operations, mods])
+                await context.send(content=f"Posted message to channel for everyone to see..", ephemeral=True)
+            else:
+                await context.send(embeds=[taw_join_info, operations, mods], ephemeral=True)
+
+
 
     @commands.hybrid_command(
         name="form", 
@@ -101,7 +119,7 @@ class Helper(commands.Cog, name="helper"):
         :param context: The hybrid command context.
         """
         latest_reddit_url = await pull_recent_reddit_post_url(self, "tawarmadivision")
-        
+
         buttons = discord.ui.View()
         buttons.add_item(discord.ui.Button(label="Twitch", style=discord.ButtonStyle.link, url = 'https://www.twitch.tv/tawarmadivision'))
         buttons.add_item(discord.ui.Button(label="Reddit", style=discord.ButtonStyle.link, url = latest_reddit_url))
