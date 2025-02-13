@@ -124,12 +124,12 @@ class StartStopButtonSelection(discord.ui.View):
     @discord.ui.button(label="Start", style=discord.ButtonStyle.green, custom_id="server_start")
     async def serverStartButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        await ServerAdminOffice.server_start(self.server, self.message_context, self.server_id, "arma3")
+        await ServerAdminOffice.server_start(self.server, self.message_context, self.server_id, "am2")
 
     @discord.ui.button(label="Stop", style=discord.ButtonStyle.red, custom_id="server_stop")
     async def serverStopButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        await ServerAdminOffice.server_stop(self.server, self.message_context, self.server_id, "arma3")
+        await ServerAdminOffice.server_stop(self.server, self.message_context, self.server_id, "am2")
 
 
 class StartStopButton(discord.ui.View):
@@ -140,9 +140,9 @@ class StartStopButton(discord.ui.View):
         self.server_type = server_type
         self.message_context = message_context
 
-    # @discord.ui.button(label="Start", style=discord.ButtonStyle.green, custom_id="server_start")  # async def serverStartButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_start(self.server, self.message_context, self.server_id, "arma3")
+    # @discord.ui.button(label="Start", style=discord.ButtonStyle.green, custom_id="server_start")  # async def serverStartButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_start(self.server, self.message_context, self.server_id, "am2")
 
-    # @discord.ui.button(label="Stop", style=discord.ButtonStyle.red, custom_id="server_stop")  # async def serverStopButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_stop(self.server, self.message_context, self.server_id, "arma3")
+    # @discord.ui.button(label="Stop", style=discord.ButtonStyle.red, custom_id="server_stop")  # async def serverStopButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_stop(self.server, self.message_context, self.server_id, "am2")
 
 
 class ServerForumButton(discord.ui.View):
@@ -219,15 +219,11 @@ class ServerAdminOffice(commands.Cog, name="server"):
         interaction = bug_report_modal.interaction
 
     param_server_id = "The 'nickname' or 'id' of the server in the web panel."
-    param_server_type = "The type of server that should be referenced, options are 'arma3' or 'reforger'."
+    param_server_type = "The type of server that should be referenced, options currently are 'am2'."
 
     @commands.hybrid_command(name="server_start", description="Start a specific server using the server id reference.", )
     @app_commands.describe(server_id=param_server_id, server_type=param_server_type)
-    # @app_commands.choices(server_type=[
-    #     discord.app_commands.Choice(name="Arma3", value="arma3"),
-    #     discord.app_commands.Choice(name="Reforger", value="reforger"),
-    # ])
-    async def server_start(self, context: Context, server_id: str, server_type: str = "arma3") -> None:
+    async def server_start(self, context: Context, server_id: str, server_type: str = "am2") -> None:
         """
         Start a specific server using the server id reference.
 
@@ -255,7 +251,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
 
     @commands.hybrid_command(name="server_stop", description=" Stop a specific server using the server id reference.", )
     @app_commands.describe(server_id=param_server_id, server_type=param_server_type)
-    async def server_stop(self, context: Context, server_id: str, server_type: str = "arma3") -> None:
+    async def server_stop(self, context: Context, server_id: str, server_type: str = "am2") -> None:
         """
         Stop a specific server using the server id reference.
 
@@ -282,7 +278,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
 
     @commands.hybrid_command(name="server_upload", description="Upload a .pbo mission file directly to the server.", )
     @app_commands.describe(mission_pbo="The .pbo file for mission you wish to upload to the server.", server_type=param_server_type)
-    async def server_mission_upload(self, context: Context, mission_pbo: discord.Attachment, server_type: str = "arma3") -> None:
+    async def server_mission_upload(self, context: Context, mission_pbo: discord.Attachment, server_type: str = "am2") -> None:
         """
         Upload a .pbo mission file directly to the server.
 
@@ -294,7 +290,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
 
     @commands.hybrid_command(name="server_list", description="List the available server_ids on the web panel.", )
     @app_commands.describe(server_type=param_server_type)
-    async def server_list(self, context: Context, server_type: str = "arma3") -> None:
+    async def server_list(self, context: Context, server_type: str = "am2") -> None:
         """
         List the available server IDs to be used in other commands.
 
@@ -328,7 +324,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
     @commands.hybrid_command(name="server_status", description="Get the current server status of a specific server_id or setup a info message for the public to see.", )
     @app_commands.describe(server_id=param_server_id, server_type=param_server_type, status_channel="Setup a auto status message in a specified channel.", server_ip="Override the IP to point at a specific address rather than localhost.",
                            server_description="Any additional information you want to include in the server status.", server_modpack="A link to the modpack used for the server.")
-    async def server_status(self, context: Context, server_id: str, server_type: str = "arma3", status_channel: discord.TextChannel = None, message_id: str = "", server_ip: str = "am2.taw.net", server_description: str = "",
+    async def server_status(self, context: Context, server_id: str, server_type: str = "am2", status_channel: discord.TextChannel = None, message_id: str = "", server_ip: str = "am2.taw.net", server_description: str = "",
                             server_modpack: str = "") -> None:
         """
         Get the current server status of a specific server_id or setup a info message for the public to see.
@@ -366,7 +362,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
 
     @commands.hybrid_command(name="server_login", description="Setup your web panel information in discord so you can use the server commands.", )
     @app_commands.describe(server_type=param_server_type)
-    async def server_login(self, context: Context, username: str, password: str, server_type: str = "arma3") -> None:
+    async def server_login(self, context: Context, username: str, password: str, server_type: str = "am2") -> None:
         """
         Setup your web panel information in discord so you can use the discord commands to interact with the servers directly.
 
@@ -519,7 +515,7 @@ async def get_workshop_info(mod_id) -> dict:
     return mod_info
 
 
-async def get_user_authentication(self, user_id: str, guild_id: str, server_type: str = "arma3") -> None:
+async def get_user_authentication(self, user_id: str, guild_id: str, server_type: str = "am2") -> None:
     authentication = await self.bot.database.get_server_authentication(user_id, guild_id, server_type)
     # print(authentication, base64.b64encode(f"{authentication['username']}:{authentication['password']}".encode()).decode())
     return base64.b64encode(f"{authentication['username']}:{authentication['password']}".encode()).decode()
