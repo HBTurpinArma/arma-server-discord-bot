@@ -20,6 +20,58 @@ class Helper(commands.Cog, name="helper"):
         self.bot = bot
 
     @commands.hybrid_command(
+        name = "signup",
+        description = "Get information on how to sign up to the unit."
+    )
+    @app_commands.choices(battalion=[discord.app_commands.Choice(name="1st Battalion (Reforger EU)", value="am1"), discord.app_commands.Choice(name="2nd Battalion (Arma 3 EU)", value="am2"), discord.app_commands.Choice(name="3rd Battalion (Arma 3 NA)", value="am3")])
+    async def signup(self, context: Context, battalion=None, post: bool=True) -> None:
+        """
+        Get information on how to sign up to the unit.
+
+        :param context:
+        """
+        taw_join_info = discord.Embed(title="""Joining TAW""", description="""To begin your journey with TAW, visit [www.taw.net](https://taw.net/) and register for the Arma division. During the registration process, you will have the option to choose the battalion that best suits your preferences and schedule.\n
+        Once you have completed the registration, it is crucial to reach out to the drill instructor of the selected battalion to initiate your onboarding process. They will guide you through the necessary steps and provide you with all the information you need to get started.\n
+        Additionally, please ensure that you have downloaded and installed any required mods and TeamSpeak software in advance, as these are essential for participating in our operations. Each battalion may have specific requirements, so be sure to check the details provided during registration or contact your drill instructor for further assistance.""",
+        color=0xBEBEFE)
+
+        if battalion == "am1":
+            battalion_info = discord.Embed(title="""1st Battalion | Arma Reforger | EU (AM1)""", description="""When signing up make sure you select the 1st Battalion, once you've signed up be sure to reach out to an AM1 staff member who will be with you shortly.""", color=0xBEBEFE)
+            battalion_info.add_field(name="Operation Times", value="- Tuesday @ 19:30 UTC\n- Thursday @ 19:30 UTC", inline=False)
+            battalion_info.add_field(name="Modpack", value="You will be prompted to download the mods when you join the server, this is only needed for Tuesday operations as Thursday's will be vanilla to allow our playstation players to join.", inline=False)
+            battalion_info.add_field(name="Servers", value="- Operation | IP:``", inline=False)
+
+            await context.send(embeds=[taw_join_info, battalion_info], ephemeral=post)
+        elif battalion == "am2":
+            battalion_info = discord.Embed(title="""2nd Battalion | Arma 3 | EU (AM2)""", description="""When signing up make sure you select the 2nd Battalion, once you've signed up be sure to reach out to an AM2 staff member who will be with you shortly.""", color=0xBEBEFE)
+            battalion_info.add_field(name="Operation Times", value="- Thursday @ 19:30 UTC\n- Sunday @ 19:30 UTC", inline=False)
+            battalion_info.add_field(name="Modpack", value="""You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2293037577)\n
+            After subscribing, load it into your launcher and ensure all dependencies are subscribed to as well. Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
+            battalion_info.add_field(name="Servers", value="- Operation | IP:`am2.taw.net:2302`\n- RNR | IP:`am2.taw.net:2602`\n- RHQ | IP:`am2.taw.net:2802`\n- CTC | IP:`am2.taw.net:2502`", inline=False)
+
+            await context.send(embeds=[taw_join_info, battalion_info], ephemeral=post)
+        elif battalion == "am3":
+            battalion_info = discord.Embed(title="""3rd Battalion | Arma 3 | NA (AM3)""", description="""When signing up make sure you select the 3rd Battalion, once you've signed up be sure to reach out to an AM3 staff member who will be with you shortly.""", color=0xBEBEFE)
+            battalion_info.add_field(name="Operation Times", value="- Sunday @ 19:00 EST", inline=False)
+            battalion_info.add_field(name="Modpack", value="""You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3395507935)\n
+            After subscribing, load it into your launcher and ensure all dependencies are subscribed to as well. Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
+            battalion_info.add_field(name="Servers", value="- Operation | IP:`am3.taw.net:2302`", inline=False)
+
+            await context.send(embeds=[taw_join_info, battalion_info], ephemeral=post)
+        else:
+            operations = discord.Embed(title="""Operation Times""", description="""Check out the operations schedule for each battalion below:""", color=0xBEBEFE)
+            operations.add_field(name="1st Battalion | Arma Reforger | EU (AM1)", value="- Tuesday @ 19:30 UTC\n- Thursday @ 19:30 UTC", inline=False)
+            operations.add_field(name="2nd Battalion | Arma 3 | EU (AM2)", value="- Thursday @ 19:30 UTC\n- Sunday @ 19:30 UTC", inline=False)
+            operations.add_field(name="3rd Battalion | Arma 3 | NA (AM3)", value="- Sunday @ 19:00 EST", inline=False)
+
+            mods = discord.Embed(title="""Modpack Installation""", description="""If you are playing on reforger, you will download mods automatically when you try and join one of the servers, for arma 3, you should install the modpack before hand as they are fairly large.""", color=0xBEBEFE)
+            mods.add_field(name="1st Battalion | Arma Reforger | EU (AM1)", value="You will be prompted to download the mods when you join the server.", inline=False)
+            mods.add_field(name="2nd Battalion | Arma 3 | EU (AM2)", value="You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2293037577), once subscribed just load it into your launcher and subscribe to all the dependencies.", inline=False)
+            mods.add_field(name="3rd Battalion | Arma 3 | NA (AM3)", value="You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3395507935), once subscribed just load it into your launcher and subscribe to all the dependencies.", inline=False)
+
+            await context.send(embeds=[taw_join_info, operations, mods], ephemeral=post)
+
+    @commands.hybrid_command(
         name="form", 
         description="Get a link to the battalion-wide form and responses.",
     )
