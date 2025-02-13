@@ -2,18 +2,7 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ext.commands import Context
 import discord
-import aiohttp
-from dotenv import load_dotenv
-from requests.auth import HTTPBasicAuth
-import os
-import base64
-import a2s
-import datetime
 import asyncpraw
-import praw
-
-load_dotenv()
-
 
 class Helper(commands.Cog, name="helper"):
     def __init__(self, bot) -> None:
@@ -82,7 +71,7 @@ class Helper(commands.Cog, name="helper"):
         :param context: The hybrid command context.
         """
         buttons = discord.ui.View()
-        buttons.add_item(discord.ui.Button(label="Battlaion Form", style=discord.ButtonStyle.link, url = 'https://docs.google.com/forms/d/e/1FAIpQLSdykee7E-75ldEvuQ4SYBT1H1dG2v4sFCG5j85dDJYcPVDgUA/viewform'))
+        buttons.add_item(discord.ui.Button(label="Battalion Form", style=discord.ButtonStyle.link, url = 'https://docs.google.com/forms/d/e/1FAIpQLSdykee7E-75ldEvuQ4SYBT1H1dG2v4sFCG5j85dDJYcPVDgUA/viewform'))
         buttons.add_item(discord.ui.Button(label="Responses", style=discord.ButtonStyle.link, url = 'https://docs.google.com/spreadsheets/d/1tkhHPKfpW2JxpQZq4vGv0gbVgtAIVgTiJkBoMc33d9E/edit?gid=1029717932#gid=1029717932'))
         
         embed = discord.Embed(title="""Battalion Form""", description="""Check out the form below for any suggestions, badge requests and feedback. The following options are available:""", color=0xBEBEFE)
@@ -95,8 +84,10 @@ class Helper(commands.Cog, name="helper"):
         embed.add_field(name=f"""Position Interest""", value=f"""Are you interested in any positions within the unit? Register your interest here even if the position is filled.""", inline=True)
         embed.add_field(name=f"""Arsenal Requests""", value=f"""Request changes to the in-game arsenal here if there's anything you feel is missing or should be removed.""", inline=True)
         embed.add_field(name=f"", value=f"", inline=True)
-        
+
+
         await context.send(embed=embed, view=buttons, ephemeral=True)
+
 
 
     @commands.hybrid_command(
