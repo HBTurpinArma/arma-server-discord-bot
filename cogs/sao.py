@@ -35,8 +35,11 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
         # Ensure that link provided is a workshop mod...
         pattern = r"https://steamcommunity\.com/sharedfiles/filedetails/\?id=(\d+)"
         match = re.match(pattern, self.answer_link)
-        if match:
-            mod_id = match.group(1)
+        pattern2 = r"https://steamcommunity\.com/sharedfiles/filedetails/\?id=(\d+)"
+        match2 = re.match(pattern, self.answer_link)
+
+        if match or match2:
+            mod_id = match.group(1) if match else match2.group(1)
 
             # Get users to mention, should be SAO + requester
             mentions = f"<@{interaction.user.id}>"
@@ -141,7 +144,6 @@ class StartStopButton(discord.ui.View):
         self.message_context = message_context
 
     # @discord.ui.button(label="Start", style=discord.ButtonStyle.green, custom_id="server_start")  # async def serverStartButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_start(self.server, self.message_context, self.server_id, "am2")
-
     # @discord.ui.button(label="Stop", style=discord.ButtonStyle.red, custom_id="server_stop")  # async def serverStopButton(self, interaction: discord.Interaction, button: discord.ui.Button):  #     await ServerAdminOffice.server_stop(self.server, self.message_context, self.server_id, "am2")
 
 
