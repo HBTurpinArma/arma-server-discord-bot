@@ -30,7 +30,7 @@
     "guild_id": 1111111111111111111,
     "invite_link": "https://discord.com/oauth2/authorize?client_id=1111111111111111111",
     "server_admin_office": {
-      "channel_id": 1111111111111111111,
+      "office_channel_id": 1111111111111111111,
       "suggestion_channel_id": 1111111111111111111,
       "forum_channel_id": 1111111111111111111,
       "forum_moderators": [1111111111111111111],
@@ -48,16 +48,23 @@
       }
     },
     "recruitment_headquarters": {
-      "channel_id": 1111111111111111111
+      "office_channel_id": 1111111111111111111
     },
     "combat_training_centre": {
-      "channel_id": 1111111111111111111
+      "office_channel_id": 1111111111111111111
     },
     "field_specialist_office": {
-      "channel_id": 1111111111111111111
+      "office_channel_id": 1111111111111111111
     },
     "mission_development": {
-      "channel_id": 1111111111111111111
+      "office_channel_id": 1111111111111111111,
+      "forum_channel_id": 1111111111111111111,
+      "forum_moderators": [1111111111111111111],
+      "forum_tags": {
+        "pending_testing": 1111111111111111111,
+        "played": 1111111111111111111,
+        "rejected": 1111111111111111111
+      }
     }
   }
 }
