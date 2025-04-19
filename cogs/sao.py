@@ -35,7 +35,7 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
         # Ensure that link provided is a workshop mod...
         pattern = r"https://steamcommunity\.com/sharedfiles/filedetails/\?id=(\d+)"
         match = re.match(pattern, self.answer_link)
-        pattern2 = r"https://steamcommunity\.com/sharedfiles/filedetails/\?id=(\d+)"
+        pattern2 = r"https://steamcommunity\.com/workshop/filedetails/\?id=(\d+)"
         match2 = re.match(pattern, self.answer_link)
 
         if match or match2:
@@ -65,8 +65,9 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
             await mod_discussion_channel.send(embed=discord.Embed(description=f"<@{interaction.user.id}> has submitted a mod request: <#{self.post[1].id}>", color=0xBEBEFE, ))
 
             # Respond to the interaction
-            await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>", color=0xBEBEFE, ),
-                ephemeral=True)
+            if interaction.response:
+                await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your mod suggestion, the server admin office will review it soon. You can view it here: <#{self.post[1].id}>", color=0xBEBEFE, ),
+                    ephemeral=True)
 
             # Send extra message in thread for workshop item info...
             embed, buttons = await get_workshop_embed(mod_id)

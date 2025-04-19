@@ -49,12 +49,18 @@ class MissionSubmissionModal(discord.ui.Modal, title="Mission Submission Form"):
         # Lets ping the head of misdev to ensure they are aware of the submission and can review it.
         mentions = ""
         for moderators in self.bot.config['discord']['mission_development']['forum_moderators']:
-            mentions += f" <@&{moderators}>"
+           mentions += f" <@&{moderators}>"
 
         await self.post[0].send(f"""{mentions} will look to review this mission submission as soon as possible, please be patient.""")
 
         # Respond to the interaction
-        await interaction.response.send_message(embed=discord.Embed(description=f"Thanks for your mission submission, misdev will review it and schedule it to be played. You can see the mission submission thread here: <#{self.post[1].id}>", color=0xBEBEFE, ), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+
+        await interaction.followup.send(embed=discord.Embed(
+                description=f"Thanks for your mission submission, MisDev will review it and schedule it to be played. You can see the mission submission thread here: <#{self.post[1].id}>",
+                color=0xBEBEFE,
+        ), ephemeral=True)
+
 
         self.stop()
 
