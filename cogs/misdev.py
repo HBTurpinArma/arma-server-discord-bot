@@ -26,7 +26,7 @@ class MissionSubmissionModal(discord.ui.Modal, title="Mission Submission Form"):
         answer_notes = str(self.mission_notes) or ""
 
         #Obtain the map name automatically from the mission file suffix.
-        answer_map = re.search(r"_\d+\.(.*?)\.pbo", self.mission_pbo.filename).group(1)
+        answer_map = re.search(r"\.(\w+)(?:\.pbo)?$", self.mission_pbo.filename).group(1)
 
         #Get users to mention, should be the user who submitted the mission and the forum moderators.
         mentions = f"<@{interaction.user.id}>"
