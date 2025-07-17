@@ -3,6 +3,8 @@ from discord import app_commands
 from discord.ext.commands import Context
 import discord
 import asyncpraw
+from datetime import datetime, timedelta, timezone
+import pytz
 
 class Helper(commands.Cog, name="helper"):
     def __init__(self, bot) -> None:
@@ -19,14 +21,49 @@ class Helper(commands.Cog, name="helper"):
 
         :param context:
         """
+
+        # Get the modpack links for each battalion
+        sog_non_cdlc_owner_link = "https://drive.google.com/file/d/1bTUDmnRW2amZm7uKz2ShikutPv3aJrKn/view?usp=drive_link"
+        sog_cdlc_owner_link = "https://drive.google.com/file/d/1TUKsKJuXpNWNIGCUOgtgEAqjPE-kcjPP/view?usp=drive_link"
+        am2_non_cdlc_owner_link = "https://drive.google.com/file/d/15JpbnAF-R0yej2MILvozztJW76kRz77V/view?usp=drive_link"
+        am2_cdlc_owner_link = "https://drive.google.com/file/d/1ZlPBnLEzuc42KZoEJwX83yQeekrRvWpJ/view?usp=drive_link"
+        sog_non_cdlc_owner_link_direct = "https://drive.google.com/uc?export=download&id=1bTUDmnRW2amZm7uKz2ShikutPv3aJrKn"
+        sog_cdlc_owner_link_direct = "https://drive.google.com/uc?export=download&id=1TUKsKJuXpNWNIGCUOgtgEAqjPE-kcjPP"
+        am2_non_cdlc_owner_link_direct = "https://drive.google.com/uc?export=download&id=15JpbnAF-R0yej2MILvozztJW76kRz77V"
+        am2_cdlc_owner_link_direct = "https://drive.google.com/uc?export=download&id=1ZlPBnLEzuc42KZoEJwX83yQeekrRvWpJ"
+
+        # Get the timestamps for each battalions events
+        am1_time_now = datetime.now(pytz.timezone('Europe/London'))
+        am1_next_tuesday = am1_time_now + (timedelta(days=(1 - am1_time_now.weekday()) % 7))
+        am1_next_tuesday = am1_next_tuesday.replace(hour=19, minute=0, second=0, microsecond=0)
+        am1_next_tuesday_timestamp = f"<t:{round(am1_next_tuesday.timestamp())}:f> (<t:{round(am1_next_tuesday.timestamp())}:R>)"
+        am1_next_thursday = am1_time_now + (timedelta(days=(3 - am1_time_now.weekday()) % 7))
+        am1_next_thursday = am1_next_thursday.replace(hour=19, minute=0, second=0, microsecond=0)
+        am1_next_thursday_timestamp = f"<t:{round(am1_next_thursday.timestamp())}:f> (<t:{round(am1_next_thursday.timestamp())}:R>)"
+        am1_next_sunday = am1_time_now + (timedelta(days=(6 - am1_time_now.weekday()) % 7))
+        am1_next_sunday = am1_next_sunday.replace(hour=19, minute=0, second=0, microsecond=0)
+        am1_next_sunday_timestamp = f"<t:{round(am1_next_sunday.timestamp())}:f> (<t:{round(am1_next_sunday.timestamp())}:R>)"
+
+        am2_time_now = datetime.now(pytz.timezone('Europe/London'))
+        am2_next_thursday = am2_time_now + (timedelta(days=(3 - am2_time_now.weekday()) % 7))
+        am2_next_thursday = am2_next_thursday.replace(hour=19, minute=0, second=0, microsecond=0)
+        am2_next_thursday_timestamp = f"<t:{round(am2_next_thursday.timestamp())}:f> (<t:{round(am2_next_thursday.timestamp())}:R>)"
+        am2_next_sunday = am2_time_now + (timedelta(days=(6 - am2_time_now.weekday()) % 7))
+        am2_next_sunday = am2_next_sunday.replace(hour=19, minute=0, second=0, microsecond=0)
+        am2_next_sunday_timestamp = f"<t:{round(am2_next_sunday.timestamp())}:f> (<t:{round(am2_next_sunday.timestamp())}:R>)"
+
+        am3_time_now = datetime.now(pytz.timezone('Europe/London'))
+
+        am4_time_now = datetime.now(pytz.timezone('Europe/London'))
+
         taw_join_info = discord.Embed(title="""Joining TAW""", description="""To begin your journey with TAW, visit [www.taw.net](https://taw.net/) and register for the Arma division. During the registration process, you will have the option to choose the battalion that best suits your preferences and schedule.\n
         Once you have completed the registration, it is crucial to reach out to the drill instructor of the selected battalion to initiate your onboarding process. They will guide you through the necessary steps and provide you with all the information you need to get started.\n
-        Additionally, please ensure that you have downloaded and installed any required mods and TeamSpeak software in advance, as these are essential for participating in our operations. Each battalion may have specific requirements, so be sure to check the details provided during registration or contact your drill instructor for further assistance.""",
+        Additionally, please ensure that you have downloaded and installed any required mods and TeamSpeak software in advance, as these are essential for participating in our operations. Each battalion may have specific requirements, so be sure to check the details provided during registration or contact your drill instructor for further assistance. Use `/signup [battalion]` to get more information on the battalion you are interested in joining.""",
         color=0xBEBEFE)
 
         if battalion == "am1":
             battalion_info = discord.Embed(title="""1st Battalion | Arma Reforger | EU (AM1)""", description="""When signing up make sure you select the 1st Battalion, once you've signed up be sure to reach out to an AM1 staff member who will be with you shortly.""", color=0xBEBEFE)
-            battalion_info.add_field(name="Operation Times", value="- Tuesday @ 19:30 UTC\n- Thursday @ 19:30 UTC", inline=False)
+            battalion_info.add_field(name="Operation Times", value=f"- Tuesday @ {am1_next_tuesday_timestamp}\n- Thursday @ {am1_next_thursday_timestamp}", inline=False)
             battalion_info.add_field(name="Modpack", value="You will be prompted to download the mods when you join the server, this is only needed for Tuesday operations as Thursday's will be vanilla to allow our playstation players to join.", inline=False)
             battalion_info.add_field(name="Servers", value="- Operation | IP:``", inline=False)
 
@@ -37,9 +74,11 @@ class Helper(commands.Cog, name="helper"):
                 await context.send(embeds=[taw_join_info, battalion_info], ephemeral=True)
         elif battalion == "am2":
             battalion_info = discord.Embed(title="""2nd Battalion | Arma 3 | EU (AM2)""", description="""When signing up make sure you select the 2nd Battalion, once you've signed up be sure to reach out to an AM2 staff member who will be with you shortly.""", color=0xBEBEFE)
-            battalion_info.add_field(name="Operation Times", value="- Thursday @ 19:30 UTC\n- Sunday @ 19:30 UTC", inline=False)
-            battalion_info.add_field(name="Modpack", value="""You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2293037577)\n
-            After subscribing, load it into your launcher and ensure all dependencies are subscribed to as well. Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
+            battalion_info.add_field(name="Operation Times", value=f"- Thursday @ {am2_next_thursday_timestamp}\n- Sunday @ {am2_next_sunday_timestamp}", inline=False)
+            battalion_info.add_field(name="Modpack", value=f"""You can download the our latest presets here, selecting the Non-CDLC Owner preset if you do not own Western Sahara CDLC:\n
+            [AM2 CDLC Owner Preset]({am2_cdlc_owner_link_direct}) or [AM2 Non-CDLC Owner Preset]({am2_non_cdlc_owner_link_direct})\n
+            Once downloaded, import it into your launcher and subscribe to all the dependencies. You can also download additional clientside mods from our [Clientside Mods List](https://discord.com/channels/1001559795310010539/1322642580827148370).\n
+            Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
             battalion_info.add_field(name="Servers", value="- Operation | IP:`am2.taw.net:2302`\n- RNR | IP:`am2.taw.net:2602`\n- RHQ | IP:`am2.taw.net:2802`\n- CTC | IP:`am2.taw.net:2502`", inline=False)
 
             if post:
@@ -49,9 +88,11 @@ class Helper(commands.Cog, name="helper"):
                 await context.send(embeds=[taw_join_info, battalion_info], ephemeral=True)
         elif battalion == "am3":
             battalion_info = discord.Embed(title="""3rd Battalion | Arma 3 | NA (AM3)""", description="""When signing up make sure you select the 3rd Battalion, once you've signed up be sure to reach out to an AM3 staff member who will be with you shortly.""", color=0xBEBEFE)
-            battalion_info.add_field(name="Operation Times", value="- Sunday @ 19:00 EST", inline=False)
-            battalion_info.add_field(name="Modpack", value="""You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3395507935)\n
-            After subscribing, load it into your launcher and ensure all dependencies are subscribed to as well. Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
+            battalion_info.add_field(name="Operation Times", value="- TBC", inline=False)
+            battalion_info.add_field(name="Modpack", value=f"""You can download the our latest presets here, selecting the Non-CDLC Owner preset if you do not own Western Sahara CDLC:\n
+            [AM2 CDLC Owner Preset]({am2_cdlc_owner_link_direct}) or [AM2 Non-CDLC Owner Preset]({am2_non_cdlc_owner_link_direct})\n
+            Once downloaded, load it into your launcher and subscribe to all the dependencies. You can also download additional clientside mods from our [Clientside Mods List](https://discord.com/channels/1001559795310010539/1322642580827148370).\n
+            Additionally, you will need to install TeamSpeak and the TFAR plugins. If you need assistance with this process, please don't hesitate to reach out.""", inline=False)
             battalion_info.add_field(name="Servers", value="- Operation | IP:`am3.taw.net:2302`", inline=False)
 
             if post:
@@ -60,21 +101,26 @@ class Helper(commands.Cog, name="helper"):
             else:
                 await context.send(embeds=[taw_join_info, battalion_info], ephemeral=True)
         else:
-            operations = discord.Embed(title="""Operation Times""", description="""Check out the operations schedule for each battalion below:""", color=0xBEBEFE)
-            operations.add_field(name="1st Battalion | Arma Reforger | EU (AM1)", value="- Tuesday @ 19:30 UTC\n- Thursday @ 19:30 UTC", inline=False)
-            operations.add_field(name="2nd Battalion | Arma 3 | EU (AM2)", value="- Thursday @ 19:30 UTC\n- Sunday @ 19:30 UTC", inline=False)
-            operations.add_field(name="3rd Battalion | Arma 3 | NA (AM3)", value="- Sunday @ 19:00 EST", inline=False)
+            operations = discord.Embed(title="""Operation Times""", description="""Check out the operations schedule for each battalion below, its recommended to be there atleast 15 minutes before:""", color=0xBEBEFE)
+            operations.add_field(name="1st Battalion | Arma Reforger | EU (AM1)", value=f"- Tuesday @ {am1_next_tuesday_timestamp}\n- Thursday @ {am1_next_thursday_timestamp}\n- Sunday (Optional) @ {am1_next_sunday_timestamp}", inline=False)
+            operations.add_field(name="2nd Battalion | Arma 3 | EU (AM2)", value=f"- Thursday @ {am2_next_thursday_timestamp}\n- Sunday @ {am2_next_sunday_timestamp}", inline=False)
+            operations.add_field(name="3rd Battalion | Arma 3 | NA (AM3)", value=f"- Sunday @ TBC", inline=False)
+            operations.add_field(name="4th Battalion | Arma Reforger | NA (AM4)", value=f"- Sunday @ TBC", inline=False)
 
-            mods = discord.Embed(title="""Modpack Installation""", description="""If you are playing on reforger, you will download mods automatically when you try and join one of the servers, for arma 3, you should install the modpack before hand as they are fairly large.""", color=0xBEBEFE)
-            mods.add_field(name="1st Battalion | Arma Reforger | EU (AM1)", value="You will be prompted to download the mods when you join the server.", inline=False)
-            mods.add_field(name="2nd Battalion | Arma 3 | EU (AM2)", value="You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2293037577), once subscribed just load it into your launcher and subscribe to all the dependencies.", inline=False)
-            mods.add_field(name="3rd Battalion | Arma 3 | NA (AM3)", value="You can download the modpack from the [steam workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3395507935), once subscribed just load it into your launcher and subscribe to all the dependencies.", inline=False)
+            # mods = discord.Embed(title="""Modpack Installation""", description="""If you are playing on reforger, you will download mods automatically when you try and join one of the servers, for arma 3, you should install the modpack before hand as they are fairly large.""", color=0xBEBEFE)
+            # mods.add_field(name="1st Battalion | Arma Reforger | EU (AM1)", value="You will be prompted to download the mods when you join the server.", inline=False)
+            # mods.add_field(name="2nd Battalion | Arma 3 | EU (AM2)", value=f"""You can download the our latest presets here, selecting the Non-CDLC Owner preset if you do not own Western Sahara CDLC:\n
+            # [AM2 CDLC Owner Preset]({am2_cdlc_owner_link_direct}) or [AM2 Non-CDLC Owner Preset]({am2_non_cdlc_owner_link_direct})\n
+            # Once downloaded, load it into your launcher and subscribe to all the dependencies.""", inline=False)
+            # mods.add_field(name="3rd Battalion | Arma 3 | NA (AM3)", value=f"""You can download the our latest presets here, selecting the Non-CDLC Owner preset if you do not own Western Sahara CDLC:\n
+            # [AM2 CDLC Owner Preset]({am2_cdlc_owner_link_direct}) or [AM2 Non-CDLC Owner Preset]({am2_non_cdlc_owner_link_direct})\n
+            # Once downloaded, load it into your launcher and subscribe to all the dependencies.""", inline=False)
 
             if post:
-                await context.channel.send(embeds=[taw_join_info, operations, mods])
+                await context.channel.send(embeds=[taw_join_info, operations])
                 await context.send(content=f"Posted message to channel for everyone to see..", ephemeral=True)
             else:
-                await context.send(embeds=[taw_join_info, operations, mods], ephemeral=True)
+                await context.send(embeds=[taw_join_info, operations], ephemeral=True)
 
 
 
@@ -103,10 +149,7 @@ class Helper(commands.Cog, name="helper"):
         embed.add_field(name=f"""Arsenal Requests""", value=f"""Request changes to the in-game arsenal here if there's anything you feel is missing or should be removed.""", inline=True)
         embed.add_field(name=f"", value=f"", inline=True)
 
-
         await context.send(embed=embed, view=buttons, ephemeral=True)
-
-
 
     @commands.hybrid_command(
         name="social", 
@@ -136,7 +179,6 @@ class Helper(commands.Cog, name="helper"):
             await context.send(content=f"Posted message to channel for everyone to see..", ephemeral=True)
         else:
             await context.send(content=f"**Be sure to like, share and follow our social media accounts!**\n Latest Reddit Post: {latest_reddit_url}\n", view=buttons, ephemeral=True)
-
 
 async def pull_recent_reddit_post_url(self, username: str):
     reddit = asyncpraw.Reddit(
