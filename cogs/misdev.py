@@ -11,11 +11,11 @@ class MissionSubmissionModal(discord.ui.Modal, title="Mission Submission Form"):
         self.mission_pbo = mission_pbo
 
     mission_title = discord.ui.TextInput(style=discord.TextStyle.short, label="Mission Title", required=True, placeholder="Operation Stinky")
-    mission_description = discord.ui.TextInput(style=discord.TextStyle.long, label="Description", required=False, placeholder="A short description of the mission and objectives.")
+    mission_description = discord.ui.TextInput(style=discord.TextStyle.long, label="Description", required=False, placeholder="A short description of the mission and objectives.", max_length=1600)
     # mission_map = discord.ui.TextInput(style=discord.TextStyle.short, label="Map", required=True, placeholder="Chernarus/Altis/Stratis")
     mission_briefing = discord.ui.TextInput(style=discord.TextStyle.short, label="Briefing", required=False, placeholder="https://docs.google.com/document/d/...")
     mission_conceptboard = discord.ui.TextInput(style=discord.TextStyle.short, label="Conceptboard", required=False, placeholder="https://app.conceptboard.com/board/...")
-    mission_notes = discord.ui.TextInput(style=discord.TextStyle.long, label="Notes", required=False, placeholder="Size? Faction? Uniform? Enemy? Anything else?")
+    mission_notes = discord.ui.TextInput(style=discord.TextStyle.long, label="Notes", required=False, placeholder="Size? Faction? Uniform? Enemy? Anything else?", max_length=1600)
 
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -32,7 +32,7 @@ class MissionSubmissionModal(discord.ui.Modal, title="Mission Submission Form"):
         mentions = f"<@{interaction.user.id}>"
         for moderators in self.bot.config['discord']['mission_development']['forum_moderators']:
             mentions += f" <@&{moderators}>"
-        answer_post = f"||{mentions}||\n# {answer_title}\n{answer_description}\n\n**Map:** {answer_map}\n**Briefing:** {answer_briefing}\n**Conceptboard:** {answer_conceptboard}\n\n**Additional Notes:**{answer_notes}"
+        answer_post = f"||{mentions}||\n# {answer_title}\n{answer_description}\n\n**Map:** {answer_map}\n**Briefing:** {answer_briefing}\n**Conceptboard:** {answer_conceptboard}\n\n"
 
         forum_channel = self.bot.get_channel(int(self.bot.config['discord']['mission_development']['forum_channel_id']))
         tags = [forum_channel.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['pending_review']))]
@@ -42,6 +42,10 @@ class MissionSubmissionModal(discord.ui.Modal, title="Mission Submission Form"):
 
         # Create thread
         self.post = await forum_channel.create_thread(name=f"Mission: {answer_title}", applied_tags=tags, content=answer_post, file=pbo_file)
+
+        # Lets ping the mission author and add a quick note to ensure all information has been provided.
+        await self.post[0].send(f"**Additional Notes:**\n{answer_notes}")
+
 
         # Lets ping the mission author and add a quick note to ensure all information has been provided.
         await self.post[0].send(f"<@{interaction.user.id}>, thanks for your submission, can you ensure all the below questions have been answered in the above thread, if not add extra information below.\n- Whats is the size of the mission, is it fit for squad, platoon or battalion?\n- What faction are we playing as? What uniform should be used?\n- What assets are available? Are there any vehicles, air support?\n- What faction are we playing against? What's their name in Zeus/Editor?\n- What is the enemy strength? How many vehicles, infantry, air?\n- Has the concept board been updated with the latest information?\n- Is there a conceptboard with visuals for HVTs/objectives?\n\nAdditionally if you have any questions or need to upload new versions, do just add to this thread directly.")
@@ -54,8 +58,6 @@ class MissionSubmissionModal(discord.ui.Modal, title="Mission Submission Form"):
         await self.post[0].send(f"""{mentions} will look to review this mission submission as soon as possible, please be patient.""")
 
         # Respond to the interaction
-        await interaction.response.defer(ephemeral=True)
-
         await interaction.followup.send(embed=discord.Embed(
                 description=f"Thanks for your mission submission, MisDev will review it and schedule it to be played. You can see the mission submission thread here: <#{self.post[1].id}>",
                 color=0xBEBEFE,
