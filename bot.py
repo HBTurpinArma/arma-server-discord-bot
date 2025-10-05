@@ -377,7 +377,7 @@ class DiscordBot(commands.Bot):
             embed.set_footer(text=f"Connect via {server_ip}:{server_port}")
 
         else: #Offline...
-            embed = discord.Embed(title=server_name, description=f"Offline", color=0xE02B2B, timestamp=datetime.datetime.utcnow())
+            embed = discord.Embed(title=server_name, description=f"Offline", color=0xE02B2B, timestamp=datetime.datetime.now(datetime.UTC))
     
         return embed
 
