@@ -57,10 +57,11 @@ class MissionSubmissionModal(discord.ui.Modal, title="Mission Submission Form"):
         await self.post[0].send(f"""{mentions} will look to review this mission submission as soon as possible, please be patient.""")
 
         # Respond to the interaction
-        await interaction.followup.send(embed=discord.Embed(
-                description=f"Thanks for your mission submission, MisDev will review it and schedule it to be played. You can see the mission submission thread here: <#{self.post[1].id}>",
-                color=0xBEBEFE,
-        ), ephemeral=True)
+        if interaction.response:
+            await interaction.response.send_message(embed=discord.Embed(
+                    description=f"Thanks for your mission submission, MisDev will review it and schedule it to be played. You can see the mission submission thread here: <#{self.post[1].id}>",
+                    color=0xBEBEFE,
+            ), ephemeral=True)
 
         self.stop()
 
@@ -78,7 +79,7 @@ class MissionFeedbackModal(discord.ui.Modal, title="Mission Feedback Form"):
         answer_bad = str(self.mission_feedback_bad) or ""
         answer_user = f"<@{interaction.user.id}>"
 
-        await interaction.channel.send(f"# Feedback from {answer_user}\n\n**What did you find good about the Operation?**\n{answer_good}\n\n**What could be improved?**\n{answer_bad}")
+        await interaction.channel.send(f"# Feedback from {answer_user}\n\n**What did you find good about the Operation?**\n{answer_good}\n\n**What could be improved?**\n{answer_bad}\n\n**Anything else?**\n{self.mission_feedback_notes or '-'}")
 
         # Respond to the interaction
         if interaction.response:
@@ -159,6 +160,10 @@ class MisdevOffice(commands.Cog, name="misdev"):
 
         # Set the forum thread tags to be played.
         await interaction.channel.add_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['played'])))
+        await interaction.channel.add_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['accepted'])))
+        await interaction.channel.remove_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['pending_review'])))
+        await interaction.channel.remove_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['scheduled'])))
+
 
         # Send the mission concept rating poll.
         poll_concept = discord.Poll(question="Rate the mission concept!", duration=timedelta(days=7))
@@ -192,8 +197,8 @@ class MisdevOffice(commands.Cog, name="misdev"):
             mentions += f" <@&{roles}>"
 
         # Send the feedback form embed with button.
-        embed = discord.Embed(title="Provide your mission feedback!", description=f"{mentions} - All members are encouraged to give feedback, at a minimum please give your ratings to the mission, zeuses and NCO.", color=0xBEBEFE)
-        await context.send(embed=embed, view=MissionFeedbackButton(self.bot))
+        embed = discord.Embed(title="Provide your mission feedback!", description=f"All members are encouraged to give feedback, at a minimum please give your ratings to the mission, zeuses and NCO above. The below feedback form can be used to provide more details for mission feedback.\n\nIf the below button doesn't work run the `/mission_feedback` command in this thread.", color=0xBEBEFE)
+        await context.send(content=mentions, embed=embed, view=MissionFeedbackButton(self.bot))
 
 
     @commands.command(name="misdev_info", description="Post information embed for mission submission / help.")
