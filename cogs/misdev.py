@@ -128,7 +128,7 @@ class MisdevOffice(commands.Cog, name="misdev"):
             await interaction.response.send_message(embed=await not_configured_embed(self), ephemeral=True)
             return
 
-        if interaction.channel.id != int(self.bot.config['discord']['mission_development']['forum_channel_id']):
+        if interaction.channel.parent_id != int(self.bot.config['discord']['mission_development']['forum_channel_id']) or not "Mission:" in interaction.channel.name:
             await interaction.response.send_message(embed=discord.Embed(description=f"Ensure that you run this command in a mission forum thread.", color=0xFF2B2B), ephemeral=True)
             return
 
@@ -148,19 +148,19 @@ class MisdevOffice(commands.Cog, name="misdev"):
             await context.send(embed=await not_configured_embed(self), ephemeral=True)
             return
 
-        if interaction.channel.parent_id != int(self.bot.config['discord']['mission_development']['forum_channel_id']):
+        if interaction.channel.parent_id != int(self.bot.config['discord']['mission_development']['forum_channel_id']) or not "Mission:" in interaction.channel.name::
             await context.send(embed=discord.Embed(description=f"Ensure that you run this command in a mission forum thread.", color=0xFF2B2B), ephemeral=True)
             return
 
         # Ensure the user has the forum moderator role.
-        if not any(role.id in self.bot.config['discord']['mission_development']['forum_moderators'] for role in interaction.user.roles):
+        if not any(role.id in (self.bot.config['discord']['mission_development']['forum_moderators'] + self.bot.config['discord']['server_admin_office']['forum_moderators']) for role in interaction.user.roles):
             # Get the context of the interaction to respond to it.
             await context.send(embed=discord.Embed(description=f"Only misdev can run this command.", color=0xFF2B2B), ephemeral=True)
             return
 
         # Set the forum thread tags to be played.
         await interaction.channel.add_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['played'])))
-        await interaction.channel.add_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['accepted'])))
+        await interaction.channel.add_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['approved'])))
         await interaction.channel.remove_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['pending_review'])))
         await interaction.channel.remove_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['scheduled'])))
 
