@@ -164,6 +164,9 @@ class MisdevOffice(commands.Cog, name="misdev"):
         await interaction.channel.remove_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['pending_review'])))
         await interaction.channel.remove_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['scheduled'])))
 
+        mentions = ""
+        for roles in self.bot.config['discord']['am2']['roles']['members']:
+            mentions += f" <@&{roles}>"
 
         # Send the mission concept rating poll.
         poll_concept = discord.Poll(question="Rate the mission concept!", duration=timedelta(days=7))
@@ -172,7 +175,7 @@ class MisdevOffice(commands.Cog, name="misdev"):
         poll_concept.add_answer(text="3")
         poll_concept.add_answer(text="4")
         poll_concept.add_answer(text="5")
-        await context.send(poll=poll_concept)
+        await context.send(content=mentions, poll=poll_concept)
 
         # Send the zeus rating poll.
         poll_zeus = discord.Poll(question="Rate your mission zeuses!", duration=timedelta(days=7))
@@ -181,7 +184,7 @@ class MisdevOffice(commands.Cog, name="misdev"):
         poll_zeus.add_answer(text="3")
         poll_zeus.add_answer(text="4")
         poll_zeus.add_answer(text="5")
-        await context.send(poll=poll_zeus)
+        await context.send(content=mentions, poll=poll_zeus)
 
         # Send the mission concept rating poll.
         poll_nco = discord.Poll(question="Rate your NCOs & leadership!", duration=timedelta(days=7))
@@ -190,15 +193,11 @@ class MisdevOffice(commands.Cog, name="misdev"):
         poll_nco.add_answer(text="3")
         poll_nco.add_answer(text="4")
         poll_nco.add_answer(text="5")
-        await context.send(poll=poll_nco)
-
-        mentions = ""
-        for roles in self.bot.config['discord']['am2']['roles']['members']:
-            mentions += f" <@&{roles}>"
+        await context.send(content=mentions, poll=poll_nco)
 
         # Send the feedback form embed with button.
-        embed = discord.Embed(title="Provide your mission feedback!", description=f"All members are encouraged to give feedback, at a minimum please give your ratings to the mission, zeuses and NCO above. The below feedback form can be used to provide more details for mission feedback.\n\nIf the below button doesn't work run the `/mission_feedback` command in this thread.", color=0xBEBEFE)
-        await context.send(content=mentions, embed=embed, view=MissionFeedbackButton(self.bot))
+        embed = discord.Embed(title="Provide your mission feedback!", description=f"At a minimum, please give your ratings for the mission, Zeuses, and NCO above.\n\nYou can use the feedback form below to share more detailed thoughts about the mission.\n\nIf the button below doesn’t work, please run the `/mission_feedback` command in this thread.", color=0xBEBEFE)
+        await context.send(embed=embed, view=MissionFeedbackButton(self.bot))
 
 
     @commands.command(name="misdev_info", description="Post information embed for mission submission / help.")
