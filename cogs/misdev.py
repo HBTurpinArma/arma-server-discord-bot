@@ -148,7 +148,7 @@ class MisdevOffice(commands.Cog, name="misdev"):
             await context.send(embed=await not_configured_embed(self), ephemeral=True)
             return
 
-        if interaction.channel.parent_id != int(self.bot.config['discord']['mission_development']['forum_channel_id']) or not "Mission:" in interaction.channel.name::
+        if interaction.channel.parent_id != int(self.bot.config['discord']['mission_development']['forum_channel_id']) or not "Mission:" in interaction.channel.name:
             await context.send(embed=discord.Embed(description=f"Ensure that you run this command in a mission forum thread.", color=0xFF2B2B), ephemeral=True)
             return
 
