@@ -70,7 +70,7 @@ class MissionFeedbackModal(discord.ui.Modal, title="Mission Feedback Form"):
         super().__init__(title=f"Mission Feedback Form")
         self.bot = bot
 
-    mission_feedback_good = discord.ui.TextInput(style=discord.TextStyle.long, label="What did you find good about the Operation?", required=True, placeholder="- Favourite parts of the mission?", max_length=2200)
+    mission_feedback_good = discord.ui.TextInput(style=discord.TextStyle.long, label="What did you find good about the Operation?", required=True, placeholder="- Favourite parts of the mission?\n- What would you want to see again?", max_length=2200)
     mission_feedback_bad = discord.ui.TextInput(style=discord.TextStyle.long, label="What could be improved?", required=True, placeholder="- Was the mission easy to follow?\n- What could they do better?\n- Issues with server performance?", max_length=2200)
     mission_feedback_notes = discord.ui.TextInput(style=discord.TextStyle.long, label="Anything else?", required=False, placeholder="", max_length=1000)
 
@@ -96,6 +96,7 @@ class MissionFeedbackButton(discord.ui.View):
 
     @discord.ui.button(label="Give Feedback", style=discord.ButtonStyle.blurple, custom_id='misdev_feedback:mission_feedback')
     async def missionFeedbackButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         mission_feedback_modal = MissionFeedbackModal(self.bot)
         await interaction.response.send_modal(mission_feedback_modal)
 
@@ -106,6 +107,8 @@ class MisdevOffice(commands.Cog, name="misdev"):
     @app_commands.command(name="mission_submission", description="Submit a mission to misdev who will review and schedule it to be played.", )
     @app_commands.describe(mission_pbo="The .pbo file for mission you are submitting.")
     async def mission_submission(self, interaction: discord.Interaction, mission_pbo: discord.Attachment) -> None:
+        await interaction.response.defer()
+
         # Return not configured error embed to interaction if executed in the wrong guild.
         if interaction.guild.id != self.bot.config['discord']['guild_id']:
             await interaction.response.send_message(embed=await not_configured_embed(self), ephemeral=True)
@@ -118,11 +121,11 @@ class MisdevOffice(commands.Cog, name="misdev"):
         # Send the modal the user and wait for a response.
         mission_submission_modal = MissionSubmissionModal(self.bot, mission_pbo)
         await interaction.response.send_modal(mission_submission_modal)
-        # await mission_submission_modal.wait()
-        # interaction = mission_submission_modal.interaction
 
     @app_commands.command(name="mission_feedback", description="Feedback on a mission just played, be sure to run this in the forum thread directly.", )
     async def mission_feedback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+
         # Return not configured error embed to interaction if executed in the wrong guild.
         if interaction.guild.id != self.bot.config['discord']['guild_id']:
             await interaction.response.send_message(embed=await not_configured_embed(self), ephemeral=True)
