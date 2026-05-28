@@ -2,8 +2,11 @@ aiohttp
 aiosqlite
 discord.py
 python-dotenv
-python-dotenv
 python-a2s
 asyncpraw
 praw
 beautifulsoup4
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+gspread
