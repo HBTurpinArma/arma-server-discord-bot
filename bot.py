@@ -388,6 +388,16 @@ class DiscordBot(commands.Bot):
         """
         await self.wait_until_ready()
 
+    async def run_command(self, cmd: str):
+        process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await process.communicate()
+        self.logger.info(f"Command '{cmd}' executed with return code {process.returncode}")
+        if stdout:
+            self.logger.info(f"Standard Output:\n{stdout.decode()}")
+        if stderr:
+            self.logger.error(f"Standard Error:\n{stderr.decode()}")
+        return process.returncode, stdout.decode(), stderr.decode()
+
 
 
 

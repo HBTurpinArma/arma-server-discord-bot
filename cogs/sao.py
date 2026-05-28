@@ -383,6 +383,38 @@ class ServerAdminOffice(commands.Cog, name="server"):
             embed = discord.Embed(title=f"Error", description=f"""Please try again or contact the server administrator.""", color=0xE02B2B)
         await context.send(embed=embed, ephemeral=True)
 
+    @commands.hybrid_command(name="server_update", description="Run the server updater script.")
+    async def server_update(self, context: Context) -> None:
+        """
+        Call a python script from a specific working directory on the same machine that runs the server update script, this is used to update the server files from steamcmd and also update any mods from the steam workshop.
+
+        :param context: The hybrid command context.
+        """
+
+        if context.guild.id != self.bot.config['discord']['guild_id']:
+            await context.send(embed=await not_configured_embed(self), ephemeral=True)
+            return
+        # Check if roles are in admin leader roles:
+        if not any(role.id in self.bot.config['discord']['am2']['roles']["admin_leader"] for role in context.author.roles):
+            await context.send(embed=await unauthorised_embed(self), ephemeral=True)
+            return
+        await context.defer(ephemeral=True)
+        response = await self.bot.run_command(self.bot.config['arma_server_web_admin']['am2']['update_command'])
+
+        if response == 200:
+            embed = discord.Embed(title="Server Update", description=f"The server update script has been executed.", color=0xBEBEFE)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        elif response == 401:
+            embed = await unauthorised_embed(self)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+        else:
+            embed = await error_embed(self, response)
+            embed.set_footer(text=f"{response.url}")
+            await context.send(embed=embed, ephemeral=True)
+
+
 
 async def get_workshop_embed(mod_id):
     mod_info = await get_workshop_info(mod_id)
