@@ -10,24 +10,28 @@ from datetime import datetime
 
 
 class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
-    def __init__(self, bot, mod_type) -> None:
-        mod_type_str = ""
-        if mod_type == 1:
-            mod_type_str = "Serverside"
-        elif mod_type == 2:
-            mod_type_str = "Clientside"
-        elif mod_type == 3:
-            mod_type_str = "Map"
-        super().__init__(title=f"Mod Request Form ({mod_type_str})")
+    def __init__(self, bot) -> None:
+        super().__init__(title=f"Mod Request Form")
         self.bot = bot
-        self.mod_type = mod_type
 
+    mod_type = discord.ui.Label(
+        text="Mod Type",
+        component=discord.ui.RadioGroup(
+            options=[
+                discord.RadioGroupOption(label="Serverside", value="serverside", default=True),
+                discord.RadioGroupOption(label="Clientside", value="clientside"),
+                discord.RadioGroupOption(label="Map", value="map")
+            ],
+            required=True,
+        ),
+    )
     mod_title = discord.ui.TextInput(style=discord.TextStyle.short, label="Mod Title", required=True, placeholder="Mod")
     mod_link = discord.ui.TextInput(style=discord.TextStyle.short, label="Steam Workshop Link", required=True, placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=")
     mod_description = discord.ui.TextInput(style=discord.TextStyle.long, label="Mod Description", required=True, placeholder="Tell us about the mod, what does it do, why would it benefit us having it?")
 
     async def on_submit(self, interaction: discord.Interaction):
         self.interaction = interaction
+        self.answer_type = str(self.mod_type)
         self.answer_title = str(self.mod_title)
         self.answer_link = str(self.mod_link)
         self.answer_description = str(self.mod_description)
@@ -36,7 +40,7 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
         pattern = r"https://steamcommunity\.com/sharedfiles/filedetails/\?id=(\d+)"
         match = re.match(pattern, self.answer_link)
         pattern2 = r"https://steamcommunity\.com/workshop/filedetails/\?id=(\d+)"
-        match2 = re.match(pattern, self.answer_link)
+        match2 = re.match(pattern2, self.answer_link)
 
         if match or match2:
             mod_id = match.group(1) if match else match2.group(1)
@@ -45,18 +49,20 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
             mentions = f"<@{interaction.user.id}>"
             for moderators in self.bot.config['discord']['server_admin_office']['forum_moderators']:
                 mentions += f" <@&{moderators}>"
+
             self.answer_post = f"||{mentions}||\n# {self.answer_title}\n{self.mod_link}\n### Description\n{self.mod_description}\n\n-# Please react and discuss the requested mod below, the server admin office will prioritise mods which have the most interest. You can show interest by reacting to this post.\n"
 
+            # Get the forum channel and tags to post with based on mod type.
             forum_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['forum_channel_id']))
-            tags = [forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review']))]
-            if self.mod_type == 1:
-                tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['serverside'])))
-            elif self.mod_type == 2:
-                tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['clientside'])))
-            elif self.mod_type == 3:
-                tags.append(forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['map'])))
+            tags = [
+                forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review'])),
+                forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['answer_type']))
+            ]
 
+            # Post the thread in the forum channel with the correct tags based on mod type.
             self.post = await forum_channel.create_thread(name=f"Mod Request: {self.answer_title}", applied_tags=tags, content=self.answer_post)
+
+            # Add default reactions for people to interact with
             await self.post[1].add_reaction("👍")
             await self.post[1].add_reaction("👎")
 
@@ -153,19 +159,9 @@ class ServerForumButton(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="Request Serverside Mod", style=discord.ButtonStyle.blurple, custom_id='sao_info:mod_suggest_serverside')
+    @discord.ui.button(label="Request Mod", style=discord.ButtonStyle.blurple, custom_id='sao_info:mod_suggest_serverside')
     async def modRequestServerButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        mod_request_modal = ModRequestModal(self.bot, 1)
-        await interaction.response.send_modal(mod_request_modal)
-
-    @discord.ui.button(label="Request Clientside Mod", style=discord.ButtonStyle.blurple, custom_id='sao_info:mod_suggest_clientside')
-    async def modRequestClientButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        mod_request_modal = ModRequestModal(self.bot, 2)
-        await interaction.response.send_modal(mod_request_modal)
-
-    @discord.ui.button(label="Map Suggestion", style=discord.ButtonStyle.blurple, custom_id='sao_info:mod_suggest_map')
-    async def modRequestMapButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        mod_request_modal = ModRequestModal(self.bot, 3)
+        mod_request_modal = ModRequestModal(self.bot)
         await interaction.response.send_modal(mod_request_modal)
 
     @discord.ui.button(label="Bug Report", style=discord.ButtonStyle.red, custom_id='sao_info:bug_report')
@@ -193,9 +189,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
         await context.send(embed=embed, view=ServerForumButton(self.bot))
 
     @app_commands.command(name="mod_request", description="Post a mod suggestion to the server forum", )
-    @app_commands.describe(type="Type of mod to suggest")
-    @app_commands.choices(type=[discord.app_commands.Choice(name="Serverside", value=1), discord.app_commands.Choice(name="Clientside", value=2), discord.app_commands.Choice(name="Map", value=3)])
-    async def mod_request(self, interaction: discord.Interaction, type: discord.app_commands.Choice[int]) -> None:
+    async def mod_request(self, interaction: discord.Interaction) -> None:
 
         # Return not configured error embed to interaction if executed in the wrong guild.
         if interaction.guild.id != self.bot.config['discord']['guild_id']:
@@ -203,7 +197,7 @@ class ServerAdminOffice(commands.Cog, name="server"):
             return
 
         # Send the modal the user andd wait response.
-        mod_request_modal = ModRequestModal(self.bot, type.value)
+        mod_request_modal = ModRequestModal(self.bot)
         await interaction.response.send_modal(mod_request_modal)
         await mod_request_modal.wait()
         interaction = mod_request_modal.interaction
