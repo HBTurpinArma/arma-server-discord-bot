@@ -6,7 +6,7 @@ import asyncpraw
 from datetime import datetime, timedelta, timezone
 import pytz
 
-class Donations(commands.Cog, name="helper"):
+class Donations(commands.Cog, name="donations"):
     def __init__(self, bot) -> None:
         self.bot = bot
 

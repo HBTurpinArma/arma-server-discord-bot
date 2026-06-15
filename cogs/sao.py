@@ -31,7 +31,7 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
 
     async def on_submit(self, interaction: discord.Interaction):
         self.interaction = interaction
-        self.answer_type = str(self.mod_type)
+        self.answer_type = str(self.mod_type.component.value)
         self.answer_title = str(self.mod_title)
         self.answer_link = str(self.mod_link)
         self.answer_description = str(self.mod_description)
@@ -56,7 +56,7 @@ class ModRequestModal(discord.ui.Modal, title="Mod Request Form"):
             forum_channel = self.bot.get_channel(int(self.bot.config['discord']['server_admin_office']['forum_channel_id']))
             tags = [
                 forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['pending_review'])),
-                forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags']['answer_type']))
+                forum_channel.get_tag(int(self.bot.config['discord']['server_admin_office']['forum_tags'][self.answer_type]))
             ]
 
             # Post the thread in the forum channel with the correct tags based on mod type.
