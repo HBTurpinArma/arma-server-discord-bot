@@ -389,7 +389,9 @@ class ServerAdminOffice(commands.Cog, name="server"):
             await context.send(embed=await not_configured_embed(self), ephemeral=True)
             return
         # Check if roles are in admin leader roles:
-        if not any(role.id in self.bot.config['discord']['am2']['roles']["admin_leader"] for role in context.author.roles):
+
+        allowed_roles = [*self.bot.config['discord']['am2']['roles']["admin_leaders"], *self.bot.config['discord']['am2']['roles']["server_techs"]]
+        if not any(role.id in allowed_roles for role in context.author.roles):
             await context.send(embed=await unauthorised_embed(self), ephemeral=True)
             return
         await context.defer(ephemeral=True)

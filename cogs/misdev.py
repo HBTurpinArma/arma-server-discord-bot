@@ -153,7 +153,8 @@ class MisdevOffice(commands.Cog, name="misdev"):
             return
 
         # Ensure the user has the forum moderator role.
-        if not any(role.id in (self.bot.config['discord']['mission_development']['forum_moderators'] + self.bot.config['discord']['server_admin_office']['forum_moderators']) for role in interaction.user.roles):
+        allowed_roles = [*self.bot.config['discord']['mission_development']['forum_moderators'], *self.bot.config['discord']['server_admin_office']['forum_moderators']]
+        if not any(role.id in allowed_roles for role in interaction.user.roles):
             # Get the context of the interaction to respond to it.
             await context.send(embed=discord.Embed(description=f"Only misdev can run this command.", color=0xFF2B2B), ephemeral=True)
             return
