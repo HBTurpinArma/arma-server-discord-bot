@@ -140,24 +140,25 @@ class MisdevOffice(commands.Cog, name="misdev"):
     @app_commands.command(name="mission_played", description="Set a mission state to played and send out the feedback forms and polls to all members.", )
     async def mission_played(self, interaction: discord.Interaction) -> None:
         context = await commands.Context.from_interaction(interaction)
-        ## Obtain the channel id and ensure it from the forum channel.
         self.bot.logger.info(f"Mission played command executed by {interaction.user.id} in channel {interaction.channel.parent_id}.")
 
         # Return not configured error embed to interaction if executed in the wrong guild.
         if interaction.guild.id != self.bot.config['discord']['guild_id']:
-            await context.send(embed=await not_configured_embed(self), ephemeral=True)
+            await interaction.response.send_message(embed=await not_configured_embed(self), ephemeral=True)
             return
 
         if interaction.channel.parent_id != int(self.bot.config['discord']['mission_development']['forum_channel_id']) or not "Mission:" in interaction.channel.name:
-            await context.send(embed=discord.Embed(description=f"Ensure that you run this command in a mission forum thread.", color=0xFF2B2B), ephemeral=True)
+            await interaction.response.send_message(embed=discord.Embed(description=f"Ensure that you run this command in a mission forum thread.", color=0xFF2B2B), ephemeral=True)
             return
 
         # Ensure the user has the forum moderator role.
         allowed_roles = [*self.bot.config['discord']['mission_development']['forum_moderators'], *self.bot.config['discord']['server_admin_office']['forum_moderators']]
         if not any(role.id in allowed_roles for role in interaction.user.roles):
-            # Get the context of the interaction to respond to it.
-            await context.send(embed=discord.Embed(description=f"Only misdev can run this command.", color=0xFF2B2B), ephemeral=True)
+            await interaction.response.send_message(embed=discord.Embed(description=f"Only misdev can run this command.", color=0xFF2B2B), ephemeral=True)
             return
+
+        # Acknowledge the interaction and continue processing; use followups for subsequent messages.
+        await interaction.response.defer()
 
         # Set the forum thread tags to be played.
         await interaction.channel.add_tags(interaction.channel.parent.get_tag(int(self.bot.config['discord']['mission_development']['forum_tags']['played'])))
@@ -169,34 +170,25 @@ class MisdevOffice(commands.Cog, name="misdev"):
 
         # Send the mission concept rating poll.
         poll_concept = discord.Poll(question="Rate the mission concept!", duration=timedelta(days=7))
-        poll_concept.add_answer(text="1")
-        poll_concept.add_answer(text="2")
-        poll_concept.add_answer(text="3")
-        poll_concept.add_answer(text="4")
-        poll_concept.add_answer(text="5")
-        await context.send(poll=poll_concept)
+        for i in range(1, 6):
+            poll_concept.add_answer(text=str(i))
+        await interaction.followup.send(poll=poll_concept)
 
         # Send the zeus rating poll.
         poll_zeus = discord.Poll(question="Rate your mission zeuses!", duration=timedelta(days=7))
-        poll_zeus.add_answer(text="1")
-        poll_zeus.add_answer(text="2")
-        poll_zeus.add_answer(text="3")
-        poll_zeus.add_answer(text="4")
-        poll_zeus.add_answer(text="5")
-        await context.send(poll=poll_zeus)
+        for i in range(1, 6):
+            poll_zeus.add_answer(text=str(i))
+        await interaction.followup.send(poll=poll_zeus)
 
-        # Send the mission concept rating poll.
+        # Send the mission NCO rating poll.
         poll_nco = discord.Poll(question="Rate your NCOs & leadership!", duration=timedelta(days=7))
-        poll_nco.add_answer(text="1")
-        poll_nco.add_answer(text="2")
-        poll_nco.add_answer(text="3")
-        poll_nco.add_answer(text="4")
-        poll_nco.add_answer(text="5")
-        await context.send(poll=poll_nco)
+        for i in range(1, 6):
+            poll_nco.add_answer(text=str(i))
+        await interaction.followup.send(poll=poll_nco)
 
         # Send the feedback form embed with button.
         embed = discord.Embed(title="Provide your mission feedback!", description=f"At a minimum, please give your ratings for the mission, Zeuses, and NCO above.\n\nYou can use the feedback form below to share more detailed thoughts about the mission.\n\nIf the button below doesn’t work, please run the `/mission_feedback` command in this thread.", color=0xBEBEFE)
-        await context.send(content=mentions, embed=embed, view=MissionFeedbackButton(self.bot))
+        await interaction.followup.send(content=mentions, embed=embed, view=MissionFeedbackButton(self.bot))
 
 
     @commands.command(name="misdev_info", description="Post information embed for mission submission / help.")
