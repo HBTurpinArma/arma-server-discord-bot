@@ -30,6 +30,7 @@ from ctc.views import (
     AmendView,
     BadgePickerView,
     LevelView,
+    PanelView,
     ResultView,
     TicketButton,
     catalogue_embed,
@@ -95,6 +96,8 @@ class CTC(commands.Cog, name="ctc"):
         # Ticket buttons carry their request id in the custom_id, so they keep
         # working after a restart without re-registering per-message views.
         self.bot.add_dynamic_items(TicketButton)
+        # The pinned panel has a fixed id, so it is a plain persistent view.
+        self.bot.add_view(PanelView())
         self.nudge_loop.start()
         self.bot.logger.info(
             f"CTC: {len(self._catalogue.all())} badges loaded, "

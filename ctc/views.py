@@ -165,9 +165,14 @@ def ticket_embed(cat: Catalogue, row: Any) -> discord.Embed:
 # ------------------------------------------------------- ticket buttons
 
 
+#: Ticket actions, named explicitly in the template. A loose ``[a-z]+`` would
+#: swallow any other ``ctc:*:*`` custom_id — the panel button did exactly that.
+TICKET_ACTIONS = ("claim", "cancel", "release", "complete", "result", "award", "reopen")
+
+
 class TicketButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"ctc:(?P<action>[a-z]+):(?P<rid>[0-9]+)",
+    template=rf"ctc:(?P<action>{'|'.join(TICKET_ACTIONS)}):(?P<rid>[0-9]+)",
 ):
     """A ticket action. Persistent across restarts via its custom_id."""
 
@@ -766,6 +771,32 @@ class AmendView(discord.ui.View):
         self.stop()
 
 
+#: Fixed id, deliberately not matching the ticket template above. Registered
+#: with bot.add_view in cog_load so the pinned panel survives restarts.
+PANEL_CUSTOM_ID = "ctc:panel:open"
+
+
+class PanelView(discord.ui.View):
+    """The pinnable panel. One button, alive forever."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Request a Badge",
+        style=discord.ButtonStyle.primary,
+        emoji="\N{MILITARY MEDAL}",
+        custom_id=PANEL_CUSTOM_ID,
+    )
+    async def request(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        cog = interaction.client.get_cog("ctc")
+        if cog is None:  # pragma: no cover - only if the cog is unloaded
+            await interaction.response.send_message("Badge system is offline.", ephemeral=True)
+            return
+        picker = BadgePickerView(cog, interaction.user)
+        await interaction.response.send_message(picker.content(), view=picker, ephemeral=True)
+
+
 def entry_point_payload(cat: Catalogue, *, with_catalogue: bool) -> dict[str, Any]:
     """The pinnable panel. Members click rather than remembering a command."""
     panel = discord.Embed(
@@ -776,13 +807,5 @@ def entry_point_payload(cat: Catalogue, *, with_catalogue: bool) -> dict[str, An
             "You can also use `/badge request` anywhere in the server."
         ),
     )
-    view = discord.ui.View(timeout=None)
-    button = discord.ui.Button(
-        label="Request a Badge",
-        style=discord.ButtonStyle.primary,
-        emoji="\N{MILITARY MEDAL}",
-        custom_id="ctc:panel:0",
-    )
-    view.add_item(button)
     embeds = [catalogue_embed(cat), panel] if with_catalogue else [panel]
-    return {"embeds": embeds, "view": view}
+    return {"embeds": embeds, "view": PanelView()}

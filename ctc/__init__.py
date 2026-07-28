@@ -8,8 +8,8 @@ row — which also makes a double-clicked button harmless.
 from __future__ import annotations
 
 import uuid
-from typing import Any
 from collections.abc import Callable, Iterable, Sequence
+from typing import Any
 
 import aiosqlite
 

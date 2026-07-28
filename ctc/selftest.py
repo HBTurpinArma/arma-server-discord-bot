@@ -22,11 +22,15 @@ import discord
 from ctc import CTCDatabaseManager, TransitionError
 from ctc import catalogue as catalogue_module
 from ctc.views import (
+    MAX_BADGES_PER_REQUEST,
+    PANEL_CUSTOM_ID,
+    TICKET_ACTIONS,
     AmendView,
     BadgePickerView,
     LevelView,
-    MAX_BADGES_PER_REQUEST,
+    PanelView,
     ResultView,
+    TicketButton,
     catalogue_embed,
     entry_point_payload,
     ticket_embed,
@@ -311,6 +315,27 @@ def _() -> None:
     both = entry_point_payload(CAT, with_catalogue=True)
     assert len(both["embeds"]) == 2
     assert both["embeds"][0].title.endswith("Badge catalogue")
+    assert isinstance(plain["view"], PanelView), "the panel must be a persistent view"
+
+
+@check("the panel button is not swallowed by the ticket button template")
+def _() -> None:
+    # Regression: the panel used custom_id "ctc:panel:0" against a loose
+    # `[a-z]+` template, so DynamicItem dispatched it as action "panel" on
+    # request 0 and the member got "Request #0 no longer exists."
+    pattern = TicketButton.__discord_ui_compiled_template__
+
+    assert pattern.fullmatch(PANEL_CUSTOM_ID) is None, (
+        f"{PANEL_CUSTOM_ID} is captured by the ticket template"
+    )
+    assert pattern.fullmatch("ctc:panel:0") is None, "the old colliding id must not match either"
+
+    # Every real ticket action still routes, and nothing else does.
+    for action in TICKET_ACTIONS:
+        match = pattern.fullmatch(f"ctc:{action}:42")
+        assert match and match["action"] == action and match["rid"] == "42", action
+    for bogus in ("ctc:sync:1", "ctc:claim:abc", "ctc:claim", "ctc:claimed:1", "other:claim:1"):
+        assert pattern.fullmatch(bogus) is None, bogus
 
 
 # ------------------------------------------------------------- lifecycle
