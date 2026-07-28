@@ -19,7 +19,8 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
+from collections.abc import Callable, Iterable
 
 CATALOGUE_PATH = Path(__file__).resolve().parent / "catalogue.json"
 
@@ -157,8 +158,8 @@ class Catalogue:
         badge = self.get(badge_key)
         order = badge.levels if badge else []
         return sorted(
-            (l for l in levels),
-            key=lambda l: order.index(l) if l in order else len(order),
+            (lvl for lvl in levels),
+            key=lambda lvl: order.index(lvl) if lvl in order else len(order),
         )
 
     def parse_levels(self, badge_key: str, stored: str | None) -> list[str]:
@@ -201,7 +202,7 @@ class Catalogue:
             return badge.name
         if short:
             return f"{badge.name} — {' / '.join(items)}"
-        return f"{badge.name} — {', '.join(self.level_name(l) for l in items)}"
+        return f"{badge.name} — {', '.join(self.level_name(lvl) for lvl in items)}"
 
     def key_for(self, name: str) -> str:
         """Derive a stable key from a display name, avoiding collisions."""

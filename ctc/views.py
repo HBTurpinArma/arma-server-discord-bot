@@ -9,7 +9,9 @@ they are ordinary views built fresh each time.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Sequence
+from collections.abc import Sequence
+from datetime import datetime, timezone
+from typing import Any
 
 import discord
 
@@ -41,10 +43,8 @@ def relative(stamp: str | None) -> str:
     """SQLite writes naive UTC; Discord wants an epoch for its relative format."""
     if not stamp:
         return "unknown"
-    import datetime as _dt
-
     try:
-        parsed = _dt.datetime.fromisoformat(stamp).replace(tzinfo=_dt.timezone.utc)
+        parsed = datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc)
     except ValueError:
         return stamp
     return f"<t:{int(parsed.timestamp())}:R>"
@@ -69,7 +69,7 @@ def catalogue_embed(cat: Catalogue) -> discord.Embed:
         category = cat.category(key)
         lines = []
         for badge in items:
-            levels = " / ".join(cat.level_name(l) for l in badge.levels)
+            levels = " / ".join(cat.level_name(lvl) for lvl in badge.levels)
             if badge.timed:
                 line = f"**{badge.name}** — \N{STOPWATCH} {levels} *(by result)*"
             elif badge.has_levels:
@@ -119,13 +119,13 @@ def ticket_embed(cat: Catalogue, row: Any) -> discord.Embed:
         if row["levels_achieved"] or row["variant"]:
             value = (
                 "Achieved: **"
-                + (", ".join(cat.level_name(l) for l in achieved) if achieved else "none")
+                + (", ".join(cat.level_name(lvl) for lvl in achieved) if achieved else "none")
                 + "**"
             )
         else:
             value = (
                 "Level is set by the score achieved — "
-                + " / ".join(cat.level_name(l) for l in badge.levels)
+                + " / ".join(cat.level_name(lvl) for lvl in badge.levels)
                 + "."
             )
             if badge.variants:
@@ -146,11 +146,11 @@ def ticket_embed(cat: Catalogue, row: Any) -> discord.Embed:
     embed.add_field(name="Requested", value=relative(row["created_at"]), inline=True)
 
     if row["levels_achieved"] and requested and len(achieved) < len(requested):
-        failed = [l for l in requested if l not in achieved]
+        failed = [lvl for lvl in requested if lvl not in achieved]
         embed.add_field(
             name="\N{WARNING SIGN} Partial result",
             value=(
-                f"Not achieved: {', '.join(cat.level_name(l) for l in failed)}. "
+                f"Not achieved: {', '.join(cat.level_name(lvl) for lvl in failed)}. "
                 "Only award the passed levels on taw.net."
             ),
             inline=False,
@@ -191,7 +191,7 @@ class TicketButton(
     @classmethod
     async def from_custom_id(
         cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /
-    ) -> "TicketButton":
+    ) -> TicketButton:
         return cls(
             match["action"],
             int(match["rid"]),
@@ -218,7 +218,10 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
 
     if status == "requested":
         view.add_item(
-            TicketButton("claim", rid, label="Claim", style=discord.ButtonStyle.primary, emoji="\N{RAISED HAND}")
+            TicketButton(
+                "claim", rid, label="Claim",
+                style=discord.ButtonStyle.primary, emoji="\N{RAISED HAND}",
+            )
         )
         view.add_item(TicketButton("cancel", rid, label="Cancel"))
 
@@ -281,7 +284,7 @@ class NotesModal(discord.ui.Modal, title="Add notes"):
         placeholder="Availability, timezone, specific goals…",
     )
 
-    def __init__(self, parent: "LevelView") -> None:
+    def __init__(self, parent: LevelView) -> None:
         super().__init__()
         self.parent = parent
         if parent.notes:
@@ -310,7 +313,7 @@ class BadgePickerView(discord.ui.View):
             if badge.timed:
                 description = "Timed test — your score sets the level"
             elif badge.has_levels:
-                description = " / ".join(cat.level_name(l) for l in badge.levels)
+                description = " / ".join(cat.level_name(lvl) for lvl in badge.levels)
             else:
                 description = "Tab — no levels"
             options.append(
@@ -358,7 +361,7 @@ class BadgePickerView(discord.ui.View):
 class LevelSelect(discord.ui.Select):
     """One badge's level dropdown. Knows which badge it belongs to."""
 
-    def __init__(self, parent: "LevelView", badge: Badge, cat: Catalogue) -> None:
+    def __init__(self, parent: LevelView, badge: Badge, cat: Catalogue) -> None:
         self.parent_view = parent
         self.badge_key = badge.key
         chosen = parent.levels.get(badge.key, [])
@@ -474,7 +477,7 @@ class LevelView(discord.ui.View):
                 if picked:
                     summary.append(
                         f"\N{WHITE HEAVY CHECK MARK} **{badge.name}** — "
-                        + ", ".join(cat.level_name(l) for l in picked)
+                        + ", ".join(cat.level_name(lvl) for lvl in picked)
                     )
                 else:
                     summary.append(f"\N{WHITE SMALL SQUARE} **{badge.name}** — *no levels selected*")
@@ -527,7 +530,7 @@ class LevelView(discord.ui.View):
 
 
 class _VariantSelect(discord.ui.Select):
-    def __init__(self, parent: "ResultView", variants: Sequence[str]) -> None:
+    def __init__(self, parent: ResultView, variants: Sequence[str]) -> None:
         self.parent_view = parent
         super().__init__(
             placeholder="Which one was run?",
@@ -543,7 +546,7 @@ class _VariantSelect(discord.ui.Select):
 
 
 class _ResultLevelSelect(discord.ui.Select):
-    def __init__(self, parent: "ResultView", options: Sequence[str], *, single: bool) -> None:
+    def __init__(self, parent: ResultView, options: Sequence[str], *, single: bool) -> None:
         self.parent_view = parent
         cat: Catalogue = parent.cog.catalogue
         super().__init__(
@@ -619,7 +622,7 @@ class ResultView(discord.ui.View):
         parts = [f"**{badge.name if badge else self.badge_key}** — request #{self.request_id}"]
         if variants:
             parts.append(f"Run: **{self.variant or '—'}**")
-        earned = ", ".join(cat.level_name(l) for l in self.levels) if self.levels else "none"
+        earned = ", ".join(cat.level_name(lvl) for lvl in self.levels) if self.levels else "none"
         parts.append(f"{'Earned' if self.timed else 'Passed'}: **{earned}**")
         if variants and not self.variant:
             parts.append("\n-# Select which one was run to confirm.")
@@ -647,7 +650,7 @@ class ResultView(discord.ui.View):
 
 
 class _AmendLevelSelect(discord.ui.Select):
-    def __init__(self, parent: "AmendView", badge: Badge, cat: Catalogue) -> None:
+    def __init__(self, parent: AmendView, badge: Badge, cat: Catalogue) -> None:
         self.parent_view = parent
         super().__init__(
             placeholder="Levels this request needs",
@@ -732,7 +735,7 @@ class AmendView(discord.ui.View):
             )
 
         fmt = lambda items: (  # noqa: E731
-            ", ".join(cat.level_name(l) for l in cat.sort_levels(self.badge_key, items))
+            ", ".join(cat.level_name(lvl) for lvl in cat.sort_levels(self.badge_key, items))
             if items
             else "none"
         )

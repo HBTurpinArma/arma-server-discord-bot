@@ -13,8 +13,10 @@ The cog owns its own SQLite file and registers its own persistent components in
 
 from __future__ import annotations
 
+import contextlib
 import os
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import aiosqlite
 import discord
@@ -101,8 +103,24 @@ class CTC(commands.Cog, name="ctc"):
 
     async def cog_unload(self) -> None:
         self.nudge_loop.cancel()
+        # Unregister so a cog reload does not double-register the handler.
+        self.bot.remove_dynamic_items(TicketButton)
         if self.database is not None:
             await self.database.connection.close()
+
+    async def active_threads(self, channel: Any) -> list[discord.Thread]:
+        """Open threads in the queue channel, newest last.
+
+        Fetched rather than read from ``channel.threads``, which is a cache that
+        can be cold or incomplete after a restart. Falls back to the cache if
+        the fetch fails.
+        """
+        try:
+            threads = [t for t in await channel.guild.active_threads() if t.parent_id == channel.id]
+        except discord.HTTPException as error:
+            self.bot.logger.warning(f"CTC: could not fetch active threads: {error}")
+            threads = list(channel.threads)
+        return sorted(threads, key=lambda t: t.created_at or discord.utils.utcnow())
 
     # -------------------------------------------------------- permissions
 
@@ -178,12 +196,11 @@ class CTC(commands.Cog, name="ctc"):
             if message is None:
                 message = await target.send(embed=embed, view=view)
 
-            # Subscribe the requester so they follow their own ticket.
+            # Subscribe the requester so they follow their own ticket. Best
+            # effort — a failure here must not lose the request.
             if thread_id:
-                try:
+                with contextlib.suppress(discord.HTTPException):
                     await target.add_user(discord.Object(id=int(row["member_id"])))
-                except discord.HTTPException:
-                    pass
 
             mention = f"<@&{role_id}>" if role_id else "A Training Instructor"
             await target.send(
@@ -289,7 +306,7 @@ class CTC(commands.Cog, name="ctc"):
 
         # Live threads are the source of truth for what is still open — a thread
         # that was archived or deleted is done, whatever the database thinks.
-        threads = sorted(channel.threads, key=lambda t: t.created_at or discord.utils.utcnow())
+        threads = await self.active_threads(channel)
         entries = [(t, await self.database.by_thread(str(t.id))) for t in threads]
 
         def is_mine(entry) -> bool:
@@ -385,11 +402,14 @@ class CTC(commands.Cog, name="ctc"):
             )
 
         if stats["turnaround"]:
+            def badge_name(key: str) -> str:
+                badge = self.catalogue.get(key)
+                return badge.name if badge else key
+
             embed.add_field(
                 name="Avg days to award",
                 value="\n".join(
-                    f"{(self.catalogue.get(r['badge_key']).name if self.catalogue.get(r['badge_key']) else r['badge_key'])}"
-                    f" — **{r['avg_days']}d** ({r['n']})"
+                    f"{badge_name(r['badge_key'])} — **{r['avg_days']}d** ({r['n']})"
                     for r in stats["turnaround"][:15]
                 ),
                 inline=False,
@@ -626,7 +646,7 @@ class CTC(commands.Cog, name="ctc"):
         cat = self.catalogue
         achieved = cat.parse_levels(updated["badge_key"], updated["levels_achieved"])
         requested = cat.parse_levels(updated["badge_key"], updated["levels"])
-        listed = ", ".join(cat.level_name(l) for l in achieved) if achieved else "none"
+        listed = ", ".join(cat.level_name(lvl) for lvl in achieved) if achieved else "none"
         ran = f" ({updated['variant']})" if updated["variant"] else ""
 
         await interaction.response.edit_message(
@@ -635,7 +655,7 @@ class CTC(commands.Cog, name="ctc"):
         await self.refresh_ticket(updated)
 
         if requested:
-            failed = ", ".join(cat.level_name(l) for l in requested if l not in achieved)
+            failed = ", ".join(cat.level_name(lvl) for lvl in requested if lvl not in achieved)
             await self.post_to_thread(
                 updated,
                 f"<@{interaction.user.id}> logged a partial result — passed: **{listed}**, "
@@ -663,9 +683,9 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         cat = self.catalogue
-        before = ", ".join(cat.level_name(l) for l in view.original) or "none"
+        before = ", ".join(cat.level_name(lvl) for lvl in view.original) or "none"
         after = ", ".join(
-            cat.level_name(l) for l in cat.parse_levels(updated["badge_key"], updated["levels"])
+            cat.level_name(lvl) for lvl in cat.parse_levels(updated["badge_key"], updated["levels"])
         )
         await interaction.response.edit_message(content=f"Updated — now needs **{after}**.", view=None)
         await self.refresh_ticket(updated)

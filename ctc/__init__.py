@@ -8,7 +8,8 @@ row — which also makes a double-clicked button harmless.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
+from collections.abc import Callable, Iterable, Sequence
 
 import aiosqlite
 
@@ -180,7 +181,7 @@ class CTCDatabaseManager:
                 cat.parse_levels(row["badge_key"], row["levels"])
             )
 
-            unknown = [l for l in achieved if l not in allowed]
+            unknown = [lvl for lvl in achieved if lvl not in allowed]
             if unknown:
                 raise TransitionError(
                     f"Level(s) {', '.join(unknown)} cannot be awarded for this request."
@@ -251,7 +252,7 @@ class CTCDatabaseManager:
         wanted = list(levels)
         if not wanted:
             raise TransitionError("A request needs at least one level.")
-        unknown = [l for l in wanted if l not in badge.levels]
+        unknown = [lvl for lvl in wanted if lvl not in badge.levels]
         if unknown:
             raise TransitionError(f"Level(s) {', '.join(unknown)} do not exist for {badge.name}.")
 

@@ -8,7 +8,7 @@ reason on the same screen and changes nothing.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any
 
 import discord
 
@@ -67,7 +67,7 @@ class _Editable(discord.ui.View):
 
 
 class _BadgePick(discord.ui.Select):
-    def __init__(self, parent: "_Editable", placeholder: str, *, availability: bool) -> None:
+    def __init__(self, parent: _Editable, placeholder: str, *, availability: bool) -> None:
         self.parent_view = parent
         self.availability = availability
         super().__init__(placeholder=placeholder, options=_badge_options(parent.cat))
@@ -156,7 +156,7 @@ class AvailabilityView(_Editable):
 
 
 class _CategorySelect(discord.ui.Select):
-    def __init__(self, parent: "ConfigEditorView", badge: Badge) -> None:
+    def __init__(self, parent: ConfigEditorView, badge: Badge) -> None:
         self.parent_view = parent
         super().__init__(
             placeholder="Category",
@@ -179,7 +179,7 @@ class _CategorySelect(discord.ui.Select):
 
 
 class _LevelsSelect(discord.ui.Select):
-    def __init__(self, parent: "ConfigEditorView", badge: Badge) -> None:
+    def __init__(self, parent: ConfigEditorView, badge: Badge) -> None:
         self.parent_view = parent
         codes = parent.cat.level_codes()
         super().__init__(
@@ -260,7 +260,7 @@ class ConfigEditorView(_Editable):
         badge = self.cat.get(self.key)
         if badge is None:
             return "That badge no longer exists."
-        levels = " / ".join(self.cat.level_name(l) for l in badge.levels) or "none (Tab)"
+        levels = " / ".join(self.cat.level_name(lvl) for lvl in badge.levels) or "none (Tab)"
         lines = [
             f"{self.notice}\n" if self.notice else None,
             f"**{badge.name}**  `{badge.key}`",
@@ -269,10 +269,14 @@ class ConfigEditorView(_Editable):
             f"Type — {_describe(badge)}",
             f"Variants — {', '.join(badge.variants) if badge.variants else 'none'}",
             "Availability — "
-            + ("\N{CONSTRUCTION SIGN} in development" if badge.wip else "\N{WHITE HEAVY CHECK MARK} available"),
+            + (
+                "\N{CONSTRUCTION SIGN} in development"
+                if badge.wip
+                else "\N{WHITE HEAVY CHECK MARK} available"
+            ),
             f"-# Also known as: {', '.join(badge.former_names)}" if badge.former_names else None,
         ]
-        return "\n".join(l for l in lines if l)
+        return "\n".join(line for line in lines if line)
 
     async def on_rename(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(NameModal(self.cog, self.actor, key=self.key))
