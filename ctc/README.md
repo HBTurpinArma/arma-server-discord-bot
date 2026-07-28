@@ -33,6 +33,7 @@ Add to `config.json` under `discord`:
   "queue_channel_id": 1111111111111111111,
   "instructor_role_id": 1111111111111111111,
   "config_role_id": 0,
+  "panel_role_id": 0,
   "taw_award_url": "https://www.taw.net/",
   "create_threads": true,
   "hide_thread_notices": true,
@@ -51,6 +52,7 @@ Every key has a default, so a missing block will not raise — but
 | `queue_channel_id` | — | Where request threads are created. Required. |
 | `instructor_role_id` | `0` | Claim/complete/award, and the queue and stats commands. **`0` means anyone**, for local testing only. |
 | `config_role_id` | `0` | Who may edit the catalogue. `0` falls back to the Manage Server permission. |
+| `panel_role_id` | `0` | Who may post the request panel. `0` falls back to the Manage Server permission. |
 | `taw_award_url` | `""` | Deep link on completed tickets. Omitted if blank. |
 | `create_threads` | `true` | `false` posts cards in the channel instead. |
 | `hide_thread_notices` | `true` | Deletes Discord's "started a thread" message. Needs Manage Messages. |

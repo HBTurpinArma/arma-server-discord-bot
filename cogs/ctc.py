@@ -49,6 +49,7 @@ DEFAULTS: dict[str, Any] = {
     "queue_channel_id": 0,
     "instructor_role_id": 0,
     "config_role_id": 0,
+    "panel_role_id": 0,
     "taw_award_url": "",
     "create_threads": True,
     "hide_thread_notices": True,
@@ -133,14 +134,23 @@ class CTC(commands.Cog, name="ctc"):
             return True  # unset means "anyone", for local testing only
         return isinstance(user, discord.Member) and any(r.id == role_id for r in user.roles)
 
-    def can_configure(self, interaction: discord.Interaction) -> bool:
-        role_id = int(self.settings["config_role_id"] or 0)
+    def has_role(self, user: discord.abc.User, setting: str) -> bool:
+        """True if the configured role is held.
+
+        Falls back to the Manage Server permission when the role is unset, so a
+        partial config still leaves someone able to act.
+        """
+        role_id = int(self.settings[setting] or 0)
         if role_id:
-            return isinstance(interaction.user, discord.Member) and any(
-                r.id == role_id for r in interaction.user.roles
-            )
-        perms = getattr(interaction.user, "guild_permissions", None)
+            return isinstance(user, discord.Member) and any(r.id == role_id for r in user.roles)
+        perms = getattr(user, "guild_permissions", None)
         return bool(perms and perms.manage_guild)
+
+    def can_configure(self, interaction: discord.Interaction) -> bool:
+        return self.has_role(interaction.user, "config_role_id")
+
+    def can_post_panel(self, interaction: discord.Interaction) -> bool:
+        return self.has_role(interaction.user, "panel_role_id")
 
     async def queue_channel(self) -> discord.abc.GuildChannel | None:
         channel_id = int(self.settings["queue_channel_id"] or 0)
@@ -489,8 +499,17 @@ class CTC(commands.Cog, name="ctc"):
 
     @badge.command(name="panel", description='Post the "Request a Badge" panel here')
     @app_commands.describe(catalogue="Include the full badge list above the button")
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def badge_panel(self, interaction: discord.Interaction, catalogue: bool = True) -> None:
+        if not self.can_post_panel(interaction):
+            role_id = int(self.settings["panel_role_id"] or 0)
+            await interaction.response.send_message(
+                "You do not have the role required to post the panel."
+                if role_id
+                else "You need Manage Server to post the panel.",
+                ephemeral=True,
+            )
+            return
+
         payload = entry_point_payload(self.catalogue, with_catalogue=catalogue)
         await interaction.channel.send(**payload)
         await interaction.response.send_message(
