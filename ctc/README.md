@@ -29,7 +29,6 @@ Add to `config.json` under `discord`:
 
 ```json
 "combat_training_centre": {
-  "office_channel_id": 1111111111111111111,
   "queue_channel_id": 1111111111111111111,
   "instructor_role_id": 1111111111111111111,
   "config_role_id": 0,
