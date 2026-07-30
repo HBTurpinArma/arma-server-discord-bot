@@ -128,21 +128,32 @@ class CTC(commands.Cog, name="ctc"):
 
     # -------------------------------------------------------- permissions
 
+    def role_ids(self, setting: str) -> list[int]:
+        """Role ids for a setting, which may be a single id or a list of them."""
+        value = self.settings[setting]
+        if not value:
+            return []
+        if isinstance(value, (list, tuple)):
+            return [int(v) for v in value if v]
+        return [int(value)]
+
+    def holds_any(self, user: discord.abc.User, setting: str) -> bool:
+        ids = set(self.role_ids(setting))
+        return bool(ids) and isinstance(user, discord.Member) and any(r.id in ids for r in user.roles)
+
     def is_instructor(self, user: discord.abc.User) -> bool:
-        role_id = int(self.settings["instructor_role_id"] or 0)
-        if not role_id:
+        if not self.role_ids("instructor_role_id"):
             return True  # unset means "anyone", for local testing only
-        return isinstance(user, discord.Member) and any(r.id == role_id for r in user.roles)
+        return self.holds_any(user, "instructor_role_id")
 
     def has_role(self, user: discord.abc.User, setting: str) -> bool:
-        """True if the configured role is held.
+        """True if any configured role is held.
 
-        Falls back to the Manage Server permission when the role is unset, so a
+        Falls back to the Manage Server permission when no role is set, so a
         partial config still leaves someone able to act.
         """
-        role_id = int(self.settings[setting] or 0)
-        if role_id:
-            return isinstance(user, discord.Member) and any(r.id == role_id for r in user.roles)
+        if self.role_ids(setting):
+            return self.holds_any(user, setting)
         perms = getattr(user, "guild_permissions", None)
         return bool(perms and perms.manage_guild)
 

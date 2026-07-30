@@ -47,6 +47,13 @@ Add to `config.json` under `discord`:
 Every key has a default, so a missing block will not raise — but
 `queue_channel_id` must be set or requests have nowhere to go.
 
+Any `*_role_id` accepts a single id or a list, so several roles can share an
+ability:
+
+```json
+"panel_role_id": [1111111111111111111, 2222222222222222222]
+```
+
 | Key | Default | Notes |
 | --- | --- | --- |
 | `queue_channel_id` | — | Where request threads are created. Required. |
