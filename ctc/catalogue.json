@@ -11,22 +11,22 @@
     {
       "key": "tabs",
       "name": "Tabs",
-      "emoji": "🎖️"
+      "emoji": "<:ctc_tabs:1533522921908207686>"
     },
     {
       "key": "infantry",
-      "name": "Infantry",
-      "emoji": "🔫"
+      "name": "Gun Range",
+      "emoji": "<:ctc_gunrange:1533522718518149230>"
     },
     {
       "key": "support",
       "name": "Support",
-      "emoji": "🩹"
+      "emoji": "<:ctc_support:1533522805218476104>"
     },
     {
       "key": "vehicles",
       "name": "Vehicles",
-      "emoji": "🚙"
+      "emoji": "<:ctc_vehicles:1533523069396848651>"
     },
     {
       "key": "air",
@@ -36,7 +36,7 @@
     {
       "key": "command",
       "name": "Command",
-      "emoji": "🎖"
+      "emoji": "<:ctc_command:1533522612569768179>"
     }
   ],
   "levels": {
@@ -91,7 +91,7 @@
     {
       "key": "cqc",
       "name": "CQC",
-      "category": "infantry",
+      "category": "support",
       "levels": [
         "B",
         "A",
@@ -113,7 +113,7 @@
     {
       "key": "support_w",
       "name": "Support Weapons",
-      "category": "infantry",
+      "category": "support",
       "levels": [
         "B",
         "A",
@@ -123,7 +123,7 @@
     {
       "key": "sniper",
       "name": "Sniper",
-      "category": "infantry",
+      "category": "support",
       "levels": [
         "B",
         "A",
@@ -188,7 +188,7 @@
     {
       "key": "rotary",
       "name": "Rotary",
-      "category": "air",
+      "category": "vehicles",
       "levels": [
         "B",
         "A",
@@ -198,7 +198,7 @@
     {
       "key": "fixed_wing",
       "name": "Fixed Wing",
-      "category": "air",
+      "category": "vehicles",
       "levels": [
         "B",
         "A",
