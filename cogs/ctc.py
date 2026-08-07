@@ -52,6 +52,7 @@ DEFAULTS: dict[str, Any] = {
     "panel_role_id": 0,
     "taw_award_url": "",
     "create_threads": True,
+    "private_threads": False,
     "hide_thread_notices": True,
     "archive_on_award": True,
     "lock_on_award": False,
@@ -203,15 +204,26 @@ class CTC(commands.Cog, name="ctc"):
                 post = await channel.create_thread(name=title, embed=embed, view=view)
                 target, thread_id, message = post.thread, post.thread.id, post.message
             elif settings["create_threads"]:
+                # A private thread is visible only to members added to it, plus
+                # anyone holding Manage Threads on the channel — which is how
+                # instructors see every request without being added to each one.
+                private = bool(settings["private_threads"])
+                kwargs: dict[str, Any] = {}
+                if private:
+                    kwargs["invitable"] = False  # members cannot pull others in
                 try:
                     thread = await channel.create_thread(
                         name=title,
-                        type=discord.ChannelType.public_thread,
+                        type=discord.ChannelType.private_thread
+                        if private
+                        else discord.ChannelType.public_thread,
                         auto_archive_duration=10080,
                         reason=f"Badge request #{row['id']}",
+                        **kwargs,
                     )
                     target, thread_id = thread, thread.id
-                    if settings["hide_thread_notices"]:
+                    # Private threads post no "started a thread" notice.
+                    if settings["hide_thread_notices"] and not private:
                         await self.hide_thread_notice(channel, thread)
                 except discord.HTTPException as error:
                     # Fall back to the channel rather than losing the request.
