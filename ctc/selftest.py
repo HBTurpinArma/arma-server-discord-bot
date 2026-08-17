@@ -428,6 +428,41 @@ def _() -> None:
     assert select_named(tab, "in development") is None
 
 
+@check("role settings survive being given a list")
+def _() -> None:
+    # Regression: role_ids() handled lists but four call sites still did
+    # int(settings[...]), which threw TypeError as soon as a setting held more
+    # than one role. It crashed the nudge loop hourly and broke every request.
+    from cogs.ctc import CTC, DEFAULTS
+
+    class Bot:
+        config = {"discord": {"combat_training_centre": {
+            "instructor_role_id": [111, 222],
+            "config_role_id": 333,
+            "panel_role_id": [],
+        }}}
+
+    cog = CTC.__new__(CTC)
+    cog.bot = Bot()
+
+    assert cog.role_ids("instructor_role_id") == [111, 222], "a list of roles"
+    assert cog.role_ids("config_role_id") == [333], "a bare id still works"
+    assert cog.role_ids("panel_role_id") == [], "empty means unset"
+
+    # Every configured role gets mentioned, not just the first.
+    assert cog.role_mention("instructor_role_id", "x") == "<@&111> <@&222>"
+    assert cog.role_mention("config_role_id", "x") == "<@&333>"
+    assert cog.role_mention("panel_role_id", "nobody") == "nobody", "falls back when unset"
+
+    # Nothing may pass a role setting straight to int().
+    source = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    for setting in ("instructor_role_id", "config_role_id", "panel_role_id"):
+        assert f'int(settings["{setting}"]' not in source, setting
+        assert f'int(self.settings["{setting}"]' not in source, setting
+
+    assert set(DEFAULTS) >= {"instructor_role_id", "config_role_id", "panel_role_id"}
+
+
 @check("the panel renders with and without the catalogue")
 def _() -> None:
     plain = entry_point_payload(CAT, with_catalogue=False)
@@ -638,6 +673,24 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
                 await db.mark_nudged(row["id"])
             assert await db.stale("requested", 48) == [], "no re-nudging within 24h"
 
+        async def panels_are_tracked_for_refresh():
+            assert await db.panels() == [], "nothing tracked yet"
+
+            await db.add_panel("chan-1", "msg-1", True)
+            await db.add_panel("chan-1", "msg-2", False)
+            assert len(await db.panels()) == 2
+
+            # Only panels embedding a catalogue need re-rendering.
+            with_cat = await db.panels(with_catalogue_only=True)
+            assert [r["message_id"] for r in with_cat] == ["msg-1"]
+
+            # Re-posting over the same message must not duplicate the row.
+            await db.add_panel("chan-1", "msg-1", True)
+            assert len(await db.panels()) == 2
+
+            await db.remove_panel("msg-1")
+            assert [r["message_id"] for r in await db.panels()] == ["msg-2"]
+
         async def stats_report():
             stats = await db.stats()
             assert any(r["status"] == "awarded" for r in stats["by_status"])
@@ -745,6 +798,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             ("an open request's levels can be amended", amend_the_request),
             ("timed tests and tabs have nothing to amend", timed_and_tabs_have_nothing_to_amend),
             ("the queue excludes finished work and nudges cool down", queue_and_stale),
+            ("panels are tracked so the catalogue can be refreshed", panels_are_tracked_for_refresh),
             ("stats report status, load and turnaround", stats_report),
             ("ticket cards render the right buttons per status", cards_render_for_every_status),
             ("a timed ticket shows the ladder, then the result", timed_card_and_buttons),

@@ -138,6 +138,11 @@ class CTC(commands.Cog, name="ctc"):
             return [int(v) for v in value if v]
         return [int(value)]
 
+    def role_mention(self, setting: str, fallback: str) -> str:
+        """Every configured role for a setting, as a mention string."""
+        ids = self.role_ids(setting)
+        return " ".join(f"<@&{i}>" for i in ids) if ids else fallback
+
     def holds_any(self, user: discord.abc.User, setting: str) -> bool:
         ids = set(self.role_ids(setting))
         return bool(ids) and isinstance(user, discord.Member) and any(r.id in ids for r in user.roles)
@@ -180,7 +185,8 @@ class CTC(commands.Cog, name="ctc"):
 
         settings = self.settings
         is_forum = isinstance(channel, discord.ForumChannel)
-        role_id = int(settings["instructor_role_id"] or 0)
+        role_ids = self.role_ids("instructor_role_id")
+        mention = self.role_mention("instructor_role_id", "A Training Instructor")
 
         for row in rows:
             embed = ticket_embed(self.catalogue, row)
@@ -238,12 +244,11 @@ class CTC(commands.Cog, name="ctc"):
                 with contextlib.suppress(discord.HTTPException):
                     await target.add_user(discord.Object(id=int(row["member_id"])))
 
-            mention = f"<@&{role_id}>" if role_id else "A Training Instructor"
             await target.send(
                 f"Hello <@{row['member_id']}>, thanks for raising this request! "
                 f"{mention} will be able to assist with this when they can.",
                 allowed_mentions=discord.AllowedMentions(
-                    roles=[discord.Object(id=role_id)] if role_id else False,
+                    roles=[discord.Object(id=i) for i in role_ids] if role_ids else False,
                     users=[discord.Object(id=int(row["member_id"]))],
                 ),
             )
@@ -504,10 +509,9 @@ class CTC(commands.Cog, name="ctc"):
     @badge.command(name="config", description="Add, edit or retire badges")
     async def badge_config(self, interaction: discord.Interaction) -> None:
         if not self.can_configure(interaction):
-            role_id = int(self.settings["config_role_id"] or 0)
             await interaction.response.send_message(
                 "You do not have the role required to edit the catalogue."
-                if role_id
+                if self.role_ids("config_role_id")
                 else "You need Manage Server to edit the catalogue.",
                 ephemeral=True,
             )
@@ -518,28 +522,87 @@ class CTC(commands.Cog, name="ctc"):
     def apply_catalogue_edit(self, fn) -> catalogue_module.Catalogue:
         """Validate, write and hot-reload the catalogue. Raises on a bad edit."""
         self._catalogue = catalogue_module.mutate(fn)
+        # Any pinned panel now shows a stale catalogue. Refresh in the
+        # background so the edit itself stays responsive.
+        self.bot.loop.create_task(self.refresh_panels())
         return self._catalogue
 
+    async def refresh_panels(self) -> None:
+        """Re-render the catalogue in every panel that embeds one."""
+        if self.database is None:
+            return
+        for row in await self.database.panels(with_catalogue_only=True):
+            try:
+                channel = self.bot.get_channel(
+                    int(row["channel_id"])
+                ) or await self.bot.fetch_channel(int(row["channel_id"]))
+                message = await channel.fetch_message(int(row["message_id"]))
+                await message.edit(**entry_point_payload(self.catalogue, with_catalogue=True))
+            except discord.NotFound:
+                # Panel deleted; stop tracking it.
+                await self.database.remove_panel(row["message_id"])
+            except discord.HTTPException as error:
+                self.bot.logger.warning(f"CTC: could not refresh panel {row['message_id']}: {error}")
+
     @badge.command(name="panel", description='Post the "Request a Badge" panel here')
-    @app_commands.describe(catalogue="Include the full badge list above the button")
-    async def badge_panel(self, interaction: discord.Interaction, catalogue: bool = True) -> None:
+    @app_commands.describe(
+        catalogue="Include the full badge list above the button",
+        message_id="Update an existing panel instead of posting a new one",
+    )
+    async def badge_panel(
+        self,
+        interaction: discord.Interaction,
+        catalogue: bool = True,
+        message_id: str | None = None,
+    ) -> None:
         if not self.can_post_panel(interaction):
-            role_id = int(self.settings["panel_role_id"] or 0)
             await interaction.response.send_message(
                 "You do not have the role required to post the panel."
-                if role_id
+                if self.role_ids("panel_role_id")
                 else "You need Manage Server to post the panel.",
                 ephemeral=True,
             )
             return
 
         payload = entry_point_payload(self.catalogue, with_catalogue=catalogue)
-        await interaction.channel.send(**payload)
+
+        # Adopting an existing panel: rewrite it in place and start tracking it,
+        # which is the only way a panel posted before tracking existed can be
+        # brought up to date without replacing it and losing its pin.
+        if message_id:
+            try:
+                message = await interaction.channel.fetch_message(int(message_id))
+            except (ValueError, discord.NotFound):
+                await interaction.response.send_message(
+                    f"No message `{message_id}` in this channel. "
+                    "Right-click the panel and Copy Message ID, and run this in its channel.",
+                    ephemeral=True,
+                )
+                return
+            except discord.HTTPException as error:
+                await interaction.response.send_message(f"Could not fetch it: {error}", ephemeral=True)
+                return
+
+            if message.author.id != interaction.client.user.id:
+                await interaction.response.send_message(
+                    "That message was not posted by me, so I cannot edit it.", ephemeral=True
+                )
+                return
+
+            await message.edit(**payload)
+            await self.database.add_panel(str(interaction.channel_id), str(message.id), catalogue)
+            await interaction.response.send_message(
+                "Panel updated and now tracked, so its catalogue stays current.", ephemeral=True
+            )
+            return
+
+        message = await interaction.channel.send(**payload)
+        await self.database.add_panel(str(interaction.channel_id), str(message.id), catalogue)
         await interaction.response.send_message(
             f"Panel posted{' with the catalogue' if catalogue else ''}. "
             "Pin it so members can always find it."
             + (
-                "\n-# The catalogue is a snapshot — re-run `/badge panel` after changing badges."
+                "\n-# The catalogue updates itself whenever a badge changes."
                 if catalogue
                 else ""
             ),
@@ -768,8 +831,8 @@ class CTC(commands.Cog, name="ctc"):
         if self.database is None:
             return
         settings = self.settings
-        role_id = int(settings["instructor_role_id"] or 0)
-        mention = f"<@&{role_id}>" if role_id else "Instructors"
+        role_ids = self.role_ids("instructor_role_id")
+        mention = self.role_mention("instructor_role_id", "Instructors")
 
         unclaimed_hours = int(settings["nudge_unclaimed_hours"])
         for row in await self.database.stale("requested", unclaimed_hours):
@@ -778,7 +841,7 @@ class CTC(commands.Cog, name="ctc"):
                 f"{mention} — still unclaimed after {unclaimed_hours}h: "
                 f"**{self.catalogue.label(row['badge_key'], row['levels'])}** "
                 f"for <@{row['member_id']}>.",
-                role_id=role_id,
+                role_ids=role_ids,
             )
             if sent:
                 await self.database.mark_nudged(int(row["id"]))
@@ -795,10 +858,15 @@ class CTC(commands.Cog, name="ctc"):
                 await self.database.mark_nudged(int(row["id"]))
 
     async def _nudge(
-        self, row: Any, content: str, *, role_id: int = 0, user_id: str | None = None
+        self,
+        row: Any,
+        content: str,
+        *,
+        role_ids: Sequence[int] = (),
+        user_id: str | None = None,
     ) -> bool:
         allowed = discord.AllowedMentions(
-            roles=[discord.Object(id=role_id)] if role_id else False,
+            roles=[discord.Object(id=i) for i in role_ids] if role_ids else False,
             users=[discord.Object(id=int(user_id))] if user_id else False,
         )
         for channel_id in (row["thread_id"], row["queue_channel_id"]):

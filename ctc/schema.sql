@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS `ctc_requests` (
   `amended_by_name`  TEXT
 );
 
+-- Panels posted by /badge panel. Tracked so the catalogue embedded in them can
+-- be re-rendered whenever the catalogue changes, instead of silently going
+-- stale the moment a badge is edited.
+CREATE TABLE IF NOT EXISTS `ctc_panels` (
+  `message_id`     TEXT PRIMARY KEY,
+  `channel_id`     TEXT NOT NULL,
+  `with_catalogue` INTEGER NOT NULL DEFAULT 1,
+  `posted_at`      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS `idx_ctc_requests_status`  ON `ctc_requests` (`status`);
 CREATE INDEX IF NOT EXISTS `idx_ctc_requests_member`  ON `ctc_requests` (`member_id`);
 CREATE INDEX IF NOT EXISTS `idx_ctc_requests_group`   ON `ctc_requests` (`group_id`);
