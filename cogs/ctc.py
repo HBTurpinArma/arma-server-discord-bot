@@ -545,8 +545,16 @@ class CTC(commands.Cog, name="ctc"):
                 self.bot.logger.warning(f"CTC: could not refresh panel {row['message_id']}: {error}")
 
     @badge.command(name="panel", description='Post the "Request a Badge" panel here')
-    @app_commands.describe(catalogue="Include the full badge list above the button")
-    async def badge_panel(self, interaction: discord.Interaction, catalogue: bool = True) -> None:
+    @app_commands.describe(
+        catalogue="Include the full badge list above the button",
+        message_id="Update an existing panel instead of posting a new one",
+    )
+    async def badge_panel(
+        self,
+        interaction: discord.Interaction,
+        catalogue: bool = True,
+        message_id: str | None = None,
+    ) -> None:
         if not self.can_post_panel(interaction):
             await interaction.response.send_message(
                 "You do not have the role required to post the panel."
@@ -557,6 +565,37 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         payload = entry_point_payload(self.catalogue, with_catalogue=catalogue)
+
+        # Adopting an existing panel: rewrite it in place and start tracking it,
+        # which is the only way a panel posted before tracking existed can be
+        # brought up to date without replacing it and losing its pin.
+        if message_id:
+            try:
+                message = await interaction.channel.fetch_message(int(message_id))
+            except (ValueError, discord.NotFound):
+                await interaction.response.send_message(
+                    f"No message `{message_id}` in this channel. "
+                    "Right-click the panel and Copy Message ID, and run this in its channel.",
+                    ephemeral=True,
+                )
+                return
+            except discord.HTTPException as error:
+                await interaction.response.send_message(f"Could not fetch it: {error}", ephemeral=True)
+                return
+
+            if message.author.id != interaction.client.user.id:
+                await interaction.response.send_message(
+                    "That message was not posted by me, so I cannot edit it.", ephemeral=True
+                )
+                return
+
+            await message.edit(**payload)
+            await self.database.add_panel(str(interaction.channel_id), str(message.id), catalogue)
+            await interaction.response.send_message(
+                "Panel updated and now tracked, so its catalogue stays current.", ephemeral=True
+            )
+            return
+
         message = await interaction.channel.send(**payload)
         await self.database.add_panel(str(interaction.channel_id), str(message.id), catalogue)
         await interaction.response.send_message(
