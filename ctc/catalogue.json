@@ -1,0 +1,230 @@
+{
+  "_comment": "Source of truth for the badge catalogue. Edit here and the picker, queue embeds and catalogue output all follow. 'formerNames' keeps old records resolvable after a rename.",
+  "_badgeTypes": {
+    "tab": "levels: [] — no levels at all (Airborne, Radio, JTAC).",
+    "graded": "levels: [...] — the member picks every level they need run, and the instructor runs them in one session.",
+    "timed": "levels: [...] plus timed: true — a timed test where the time achieved decides the level. Nothing is picked at request time; the instructor records the result on completion."
+  },
+  "_wip": "wip: true hides a badge from the request picker but keeps it in the catalogue, marked Work in Progress. Remove the flag to open it up.",
+  "_variants": "variants: [...] — a badge run in several forms (e.g. Gun Range by weapon). The instructor picks which one was run when recording the result. Max 25.",
+  "categories": [
+    {
+      "key": "tabs",
+      "name": "Tabs",
+      "emoji": "<:ctc_tabs:1533522921908207686>"
+    },
+    {
+      "key": "infantry",
+      "name": "Gun Range",
+      "emoji": "<:ctc_gunrange:1533522718518149230>"
+    },
+    {
+      "key": "support",
+      "name": "Support",
+      "emoji": "<:ctc_support:1533522805218476104>"
+    },
+    {
+      "key": "vehicles",
+      "name": "Vehicles",
+      "emoji": "<:ctc_vehicles:1533523069396848651>"
+    },
+    {
+      "key": "air",
+      "name": "Air",
+      "emoji": "✈️"
+    },
+    {
+      "key": "command",
+      "name": "Command",
+      "emoji": "<:ctc_command:1533522612569768179>"
+    }
+  ],
+  "levels": {
+    "B": "Basic",
+    "A": "Advanced",
+    "E": "Expert",
+    "M": "Master"
+  },
+  "badges": [
+    {
+      "key": "airborne",
+      "name": "Airborne",
+      "category": "tabs",
+      "levels": []
+    },
+    {
+      "key": "radio",
+      "name": "Radio",
+      "category": "tabs",
+      "levels": []
+    },
+    {
+      "key": "jtac",
+      "name": "JTAC",
+      "category": "tabs",
+      "levels": [],
+      "wip": true
+    },
+    {
+      "key": "gun_range",
+      "name": "Gun Range",
+      "category": "infantry",
+      "levels": [
+        "B",
+        "A",
+        "E",
+        "M"
+      ],
+      "timed": true,
+      "variants": [
+        "Rifle",
+        "Pistol",
+        "SMG",
+        "Shotgun",
+        "HMG"
+      ],
+      "formerNames": [
+        "HMG"
+      ],
+      "note": "HMG is a Gun Range variant, not its own badge — kept in formerNames so old records still resolve."
+    },
+    {
+      "key": "cqc",
+      "name": "CQC",
+      "category": "support",
+      "levels": [
+        "B",
+        "A",
+        "E",
+        "M"
+      ],
+      "timed": true
+    },
+    {
+      "key": "grenadier",
+      "name": "Grenadier",
+      "category": "infantry",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ]
+    },
+    {
+      "key": "support_w",
+      "name": "Support Weapons",
+      "category": "support",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ]
+    },
+    {
+      "key": "sniper",
+      "name": "Sniper",
+      "category": "support",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ],
+      "wip": true
+    },
+    {
+      "key": "scouting",
+      "name": "Scouting",
+      "category": "infantry",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ]
+    },
+    {
+      "key": "medical",
+      "name": "Medical",
+      "category": "support",
+      "levels": [
+        "B",
+        "A"
+      ]
+    },
+    {
+      "key": "combat_eng",
+      "name": "Combat Engineer",
+      "category": "support",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ],
+      "formerNames": [
+        "Explosive Ordnance"
+      ],
+      "wip": true
+    },
+    {
+      "key": "indirect",
+      "name": "Indirect Fire",
+      "category": "support",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ]
+    },
+    {
+      "key": "vehicle",
+      "name": "Vehicle",
+      "category": "vehicles",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ],
+      "wip": true
+    },
+    {
+      "key": "rotary",
+      "name": "Rotary",
+      "category": "vehicles",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ]
+    },
+    {
+      "key": "fixed_wing",
+      "name": "Fixed Wing",
+      "category": "vehicles",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ]
+    },
+    {
+      "key": "leadership",
+      "name": "Leadership",
+      "category": "command",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ],
+      "wip": true
+    },
+    {
+      "key": "game_master",
+      "name": "Game Master",
+      "category": "command",
+      "levels": [
+        "B",
+        "A",
+        "E"
+      ]
+    }
+  ]
+}
