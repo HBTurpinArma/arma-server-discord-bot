@@ -132,6 +132,25 @@ SMG, Shotgun or HMG. The member requests Gun Range; the instructor says which
 was run when recording the result, and the database refuses a completion without
 one.
 
+## Hiding what is not ready
+
+`"wip": true` keeps a badge in the catalogue but drops it out of the picker. It
+is listed under "In development" instead.
+
+`"wipLevels": ["A", "E"]` does the same for individual levels, so a badge can be
+requestable at Basic while its higher levels are still being written:
+
+```
+Grenadier B · A, E in development
+```
+
+Those levels are not offered in the picker and a timed test cannot award them.
+If every level lands in `wipLevels` the badge has nothing left to ask for, so it
+drops out of the picker exactly as a fully `wip` badge would.
+
+Existing tickets keep working either way; both flags only affect what can be
+newly requested.
+
 ## One ticket per badge
 
 Three badges in one submission creates **three** tickets sharing a `group_id`,
@@ -147,7 +166,8 @@ embeds and catalogue listing all read from it, so they cannot drift.
 `/badge config` writes to it and hot-reloads. Edits are validated *before* they
 reach disk, and the previous file is restored if a write somehow produced
 something unloadable. Rejected: unknown level or category, duplicate key, a Tab
-marked timed, more than 25 requestable badges (Discord's select menu limit).
+marked timed, a `wipLevels` entry the badge does not have, and more than 25
+requestable badges (Discord's select menu limit).
 
 Renaming keeps the old name in `formerNames` so historic rows still resolve.
 Deleting warns how many requests reference the badge and offers "mark in

@@ -65,20 +65,55 @@ def catalogue_embed(cat: Catalogue) -> discord.Embed:
     for badge in cat.all():
         grouped.setdefault(badge.category, []).append(badge)
 
+    # Full-width rows rather than Discord's default three ragged columns, and
+    # short level codes so no badge wraps onto a second line.
+    pending: list[str] = []
+
     for key, items in grouped.items():
         category = cat.category(key)
         lines = []
         for badge in items:
-            levels = " / ".join(cat.level_name(lvl) for lvl in badge.levels)
-            if badge.timed:
-                line = f"**{badge.name}** — \N{STOPWATCH} {levels} *(by result)*"
-            elif badge.has_levels:
-                line = f"**{badge.name}** — {levels}"
-            else:
-                line = f"**{badge.name}** — Tab"
-            lines.append(f"\N{CONSTRUCTION SIGN} {line} *— in development*" if badge.wip else line)
-        embed.add_field(name=f"{category['emoji']} {category['name']}", value="\n".join(lines))
+            if badge.wip:
+                pending.append(badge.name)
+                continue
 
+            available = badge.available_levels
+            if not badge.has_levels:
+                line = f"**{badge.name}** Tab"
+            elif not available:
+                pending.append(badge.name)
+                continue
+            else:
+                line = f"**{badge.name}** {' / '.join(available)}"
+                if badge.timed:
+                    line += " · by result"
+                if badge.wip_levels:
+                    soon = ", ".join(badge.wip_levels)
+                    line += f" *· {soon} in development*"
+            lines.append(line)
+
+        if lines:
+            embed.add_field(
+                name=f"{category['emoji']} {category['name']}",
+                value="\n".join(lines),
+                inline=False,
+            )
+
+    if pending:
+        embed.add_field(
+            name="In development",
+            value="Not yet requestable: " + ", ".join(sorted(pending)),
+            inline=False,
+        )
+
+    embed.add_field(
+        name="Key",
+        value=(
+            "**B** basic · **A** advanced · **E** expert · **M** master\n"
+            "**Tab** no levels · **by result** your score sets the level, one per run"
+        ),
+        inline=False,
+    )
     embed.set_footer(
         text=f"{len(cat.all())} badges · {len(cat.requestable())} available to request"
     )
@@ -370,17 +405,19 @@ class LevelSelect(discord.ui.Select):
         self.parent_view = parent
         self.badge_key = badge.key
         chosen = parent.levels.get(badge.key, [])
+        # Levels still in development are not offered at all.
+        offered = badge.available_levels
         super().__init__(
             placeholder=f"{badge.name} — every level you still need"[:150],
             min_values=1,
-            max_values=len(badge.levels),
+            max_values=len(offered),
             options=[
                 discord.SelectOption(
                     label=f"{badge.name} — {cat.level_name(code)}"[:100],
                     value=code,
                     default=code in chosen,
                 )
-                for code in badge.levels
+                for code in offered
             ],
         )
 
