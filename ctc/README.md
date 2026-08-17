@@ -61,6 +61,7 @@ ability:
 | `panel_role_id` | `0` | Who may post the request panel. `0` falls back to the Manage Server permission. |
 | `taw_award_url` | `""` | Deep link on completed tickets. Omitted if blank. |
 | `create_threads` | `true` | `false` posts cards in the channel instead. |
+| `private_threads` | `false` | `true` makes each request a private thread. See below. |
 | `hide_thread_notices` | `true` | Deletes Discord's "started a thread" message. Needs Manage Messages. |
 | `archive_on_award` | `true` | Archives the thread once awarded or cancelled. |
 | `lock_on_award` | `false` | Also locks it, so only moderators can reopen. |
@@ -68,13 +69,30 @@ ability:
 A Forum channel is detected automatically — each request becomes a forum post
 and Discord posts no system message, so `hide_thread_notices` is unused there.
 
+### Private threads
+
+With `private_threads: true` a request is visible only to the member who raised
+it, plus anyone holding **Manage Threads** on the channel. Grant that permission
+to the instructor role and instructors see every request without the bot having
+to add them to each one individually.
+
+The bot needs **Create Private Threads** as well, and members are blocked from
+inviting others (`invitable=False`). Discord posts no "started a thread" notice
+for private threads, so `hide_thread_notices` is unused in this mode.
+
+Public and private are fixed at creation and Discord cannot convert between
+them, so switching the flag only affects new requests. Existing threads keep
+whatever they were made as.
+
 ### Bot permissions on the queue channel
 
 View Channel, Send Messages, Embed Links, Read Message History,
-Create Public Threads, Send Messages in Threads, Manage Messages (to delete
-thread notices), and Mention All Roles — the last only if the instructor role
-is not set "Allow anyone to @mention this role", otherwise pings render but
-never notify.
+Create Public Threads, Create Private Threads, Send Messages in Threads,
+Manage Messages (to delete thread notices), and Mention All Roles — the last
+only if the instructor role is not set "Allow anyone to @mention this role",
+otherwise pings render but never notify.
+
+Permission integer `377957346304` covers all of those.
 
 Members need **View Channel** on the parent channel; thread visibility is
 inherited and cannot be granted separately. Deny them Send Messages and allow
@@ -114,6 +132,25 @@ SMG, Shotgun or HMG. The member requests Gun Range; the instructor says which
 was run when recording the result, and the database refuses a completion without
 one.
 
+## Hiding what is not ready
+
+`"wip": true` keeps a badge in the catalogue but drops it out of the picker. It
+is listed under "In development" instead.
+
+`"wipLevels": ["A", "E"]` does the same for individual levels, so a badge can be
+requestable at Basic while its higher levels are still being written:
+
+```
+Grenadier B · A, E in development
+```
+
+Those levels are not offered in the picker and a timed test cannot award them.
+If every level lands in `wipLevels` the badge has nothing left to ask for, so it
+drops out of the picker exactly as a fully `wip` badge would.
+
+Existing tickets keep working either way; both flags only affect what can be
+newly requested.
+
 ## One ticket per badge
 
 Three badges in one submission creates **three** tickets sharing a `group_id`,
@@ -129,7 +166,8 @@ embeds and catalogue listing all read from it, so they cannot drift.
 `/badge config` writes to it and hot-reloads. Edits are validated *before* they
 reach disk, and the previous file is restored if a write somehow produced
 something unloadable. Rejected: unknown level or category, duplicate key, a Tab
-marked timed, more than 25 requestable badges (Discord's select menu limit).
+marked timed, a `wipLevels` entry the badge does not have, and more than 25
+requestable badges (Discord's select menu limit).
 
 Renaming keeps the old name in `formerNames` so historic rows still resolve.
 Deleting warns how many requests reference the badge and offers "mark in

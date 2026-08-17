@@ -294,18 +294,111 @@ def _() -> None:
     assert [o.value for o in grenadier.options] == ["B", "A", "E"]
 
 
-@check("the catalogue embed flags kind and availability")
+@check("the catalogue embed lists every badge, in full-width rows")
 def _() -> None:
     embed = catalogue_embed(CAT)
     text = "\n".join(f.value for f in embed.fields)
+
     for badge in CAT.all():
-        assert badge.name in text, badge.name
-    assert "(by result)" in text
-    assert "Airborne** — Tab" in text
-    for badge in CAT.all():
-        if badge.wip:
-            assert f"**{badge.name}** *— in development*" in text or badge.name in text
+        assert badge.name in text, f"{badge.name} missing from the catalogue"
+
+    # Ragged three-column packing is what inline=True causes; every field here
+    # must be full width.
+    assert all(f.inline is False for f in embed.fields), "all fields must be full width"
+
+    assert "by result" in text, "timed badges are marked"
+    assert "**Airborne** Tab" in text
     assert f"{len(CAT.all())} badges" in embed.footer.text
+
+
+@check("the catalogue separates in-development badges and explains the codes")
+def _() -> None:
+    embed = catalogue_embed(CAT)
+    names = [f.name for f in embed.fields]
+    assert "Key" in names, "the level codes are explained"
+    assert names[-1] == "Key", "the key sits at the bottom"
+
+    key = next(f.value for f in embed.fields if f.name == "Key")
+    for code, word in [("B", "basic"), ("A", "advanced"), ("E", "expert"), ("M", "master")]:
+        assert f"**{code}** {word}" in key, code
+    assert "by result" in key
+
+    wip = [b.name for b in CAT.all() if b.wip]
+    if wip:
+        pending = next(f.value for f in embed.fields if f.name == "In development")
+        for name in wip:
+            assert name in pending, f"{name} should be listed as pending"
+        # ...and nowhere in the requestable rows.
+        rows = "\n".join(f.value for f in embed.fields if f.name not in ("In development", "Key"))
+        for name in wip:
+            assert name not in rows, f"{name} should not appear as requestable"
+
+
+@check("a level can be in development while the badge stays requestable")
+def _() -> None:
+    raw = json.loads(catalogue_module.CATALOGUE_PATH.read_text(encoding="utf-8"))
+    for entry in raw["badges"]:
+        if entry["key"] == "grenadier":
+            entry["wipLevels"] = ["A", "E"]
+    cat = catalogue_module.Catalogue(raw)
+
+    badge = cat.get("grenadier")
+    assert badge.levels == ["B", "A", "E"], "the ladder is unchanged"
+    assert badge.available_levels == ["B"], "only Basic can be run"
+    assert badge.partly_wip is True
+    assert "grenadier" in [b.key for b in cat.requestable()], "still requestable at Basic"
+
+    # The picker must not offer a level nobody can be tested on.
+    view = LevelView(FakeCog(cat), FakeUser(), ["grenadier"])
+    select = select_named(view, "Grenadier")
+    assert [o.value for o in select.options] == ["B"]
+    assert select.max_values == 1
+
+    # The whole ladder stays visible, with the unrunnable levels struck out.
+    embed = catalogue_embed(cat)
+    text = "\n".join(f.value for f in embed.fields)
+    assert "**Grenadier** B / ~~A~~ / ~~E~~" in text, text
+
+    key = next(f.value for f in embed.fields if f.name == "Key")
+    assert "~~Struck through~~" in key, "the key explains the strikethrough"
+
+
+@check("a badge with every level in development drops out of the picker")
+def _() -> None:
+    raw = json.loads(catalogue_module.CATALOGUE_PATH.read_text(encoding="utf-8"))
+    for entry in raw["badges"]:
+        if entry["key"] == "medical":
+            entry["wipLevels"] = ["B", "A"]
+    cat = catalogue_module.Catalogue(raw)
+
+    assert cat.get("medical").available_levels == []
+    assert "medical" not in [b.key for b in cat.requestable()], "nothing left to ask for"
+    pending = next(f.value for f in catalogue_embed(cat).fields if f.name == "In development")
+    assert "Medical" in pending
+
+
+@check("a level marked in development must actually exist on the badge")
+def _() -> None:
+    raw = json.loads(catalogue_module.CATALOGUE_PATH.read_text(encoding="utf-8"))
+    for entry in raw["badges"]:
+        if entry["key"] == "medical":
+            entry["wipLevels"] = ["M"]  # Medical is B / A only
+    try:
+        catalogue_module.Catalogue(raw)
+    except catalogue_module.CatalogueError as error:
+        assert "in development" in str(error).lower()
+    else:
+        raise AssertionError("expected an unknown wip level to be rejected")
+
+
+@check("a timed test cannot award a level that is in development")
+def _() -> None:
+    raw = json.loads(catalogue_module.CATALOGUE_PATH.read_text(encoding="utf-8"))
+    for entry in raw["badges"]:
+        if entry["key"] == "cqc":
+            entry["wipLevels"] = ["M"]
+    cat = catalogue_module.Catalogue(raw)
+    assert cat.awardable_levels("cqc", None) == ["B", "A", "E"], "Master is not runnable yet"
 
 
 @check("the panel renders with and without the catalogue")

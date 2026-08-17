@@ -38,7 +38,10 @@ class CatalogueError(Exception):
 class Badge:
     """A single badge. Thin wrapper so call sites read like prose."""
 
-    __slots__ = ("key", "name", "category", "levels", "timed", "wip", "variants", "former_names")
+    __slots__ = (
+        "key", "name", "category", "levels", "timed", "wip", "wip_levels",
+        "variants", "former_names",
+    )
 
     def __init__(self, raw: dict[str, Any]) -> None:
         self.key: str = raw["key"]
@@ -47,12 +50,24 @@ class Badge:
         self.levels: list[str] = list(raw.get("levels") or [])
         self.timed: bool = raw.get("timed") is True
         self.wip: bool = raw.get("wip") is True
+        #: Levels that exist on paper but are not yet runnable. The badge is
+        #: still requestable at whatever levels remain.
+        self.wip_levels: list[str] = list(raw.get("wipLevels") or [])
         self.variants: list[str] = list(raw.get("variants") or [])
         self.former_names: list[str] = list(raw.get("formerNames") or [])
 
     @property
     def has_levels(self) -> bool:
         return bool(self.levels)
+
+    @property
+    def available_levels(self) -> list[str]:
+        """Levels a member can actually be tested on today."""
+        return [lvl for lvl in self.levels if lvl not in self.wip_levels]
+
+    @property
+    def partly_wip(self) -> bool:
+        return bool(self.wip_levels) and not self.wip
 
     @property
     def has_variants(self) -> bool:
@@ -102,6 +117,12 @@ class Catalogue:
                     raise CatalogueError(f"Badge {badge.key} has unknown level {level}")
             if badge.timed and not badge.levels:
                 raise CatalogueError(f"{badge.name} is timed but has no levels to award")
+            unknown = [lvl for lvl in badge.wip_levels if lvl not in badge.levels]
+            if unknown:
+                raise CatalogueError(
+                    f"{badge.name} marks level(s) {', '.join(unknown)} in development "
+                    "but does not have them"
+                )
             if len(badge.variants) > MAX_SELECT_OPTIONS:
                 raise CatalogueError(f"Badge {badge.key} has more than 25 variants")
             by_key[badge.key] = badge
@@ -122,8 +143,16 @@ class Catalogue:
         return list(self._sorted)
 
     def requestable(self) -> list[Badge]:
-        """The badges the picker actually offers."""
-        return [b for b in self._sorted if not b.wip]
+        """The badges the picker actually offers.
+
+        A graded badge whose every level is in development has nothing left to
+        ask for, so it drops out the same as a fully wip badge.
+        """
+        return [
+            b
+            for b in self._sorted
+            if not b.wip and (not b.has_levels or b.available_levels)
+        ]
 
     def get(self, key: str) -> Badge | None:
         return self._by_key.get(key)
@@ -181,7 +210,9 @@ class Catalogue:
         if asked:
             return asked
         badge = self.get(badge_key)
-        return list(badge.levels) if badge and badge.timed else []
+        # A timed test can land anywhere on its ladder, minus anything not yet
+        # runnable.
+        return list(badge.available_levels) if badge and badge.timed else []
 
     def label(
         self, badge_key: str, levels: str | Iterable[str] | None = None, *, short: bool = False
