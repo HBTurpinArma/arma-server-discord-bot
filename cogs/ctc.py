@@ -518,7 +518,27 @@ class CTC(commands.Cog, name="ctc"):
     def apply_catalogue_edit(self, fn) -> catalogue_module.Catalogue:
         """Validate, write and hot-reload the catalogue. Raises on a bad edit."""
         self._catalogue = catalogue_module.mutate(fn)
+        # Any pinned panel now shows a stale catalogue. Refresh in the
+        # background so the edit itself stays responsive.
+        self.bot.loop.create_task(self.refresh_panels())
         return self._catalogue
+
+    async def refresh_panels(self) -> None:
+        """Re-render the catalogue in every panel that embeds one."""
+        if self.database is None:
+            return
+        for row in await self.database.panels(with_catalogue_only=True):
+            try:
+                channel = self.bot.get_channel(
+                    int(row["channel_id"])
+                ) or await self.bot.fetch_channel(int(row["channel_id"]))
+                message = await channel.fetch_message(int(row["message_id"]))
+                await message.edit(**entry_point_payload(self.catalogue, with_catalogue=True))
+            except discord.NotFound:
+                # Panel deleted; stop tracking it.
+                await self.database.remove_panel(row["message_id"])
+            except discord.HTTPException as error:
+                self.bot.logger.warning(f"CTC: could not refresh panel {row['message_id']}: {error}")
 
     @badge.command(name="panel", description='Post the "Request a Badge" panel here')
     @app_commands.describe(catalogue="Include the full badge list above the button")
@@ -534,12 +554,13 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         payload = entry_point_payload(self.catalogue, with_catalogue=catalogue)
-        await interaction.channel.send(**payload)
+        message = await interaction.channel.send(**payload)
+        await self.database.add_panel(str(interaction.channel_id), str(message.id), catalogue)
         await interaction.response.send_message(
             f"Panel posted{' with the catalogue' if catalogue else ''}. "
             "Pin it so members can always find it."
             + (
-                "\n-# The catalogue is a snapshot — re-run `/badge panel` after changing badges."
+                "\n-# The catalogue updates itself whenever a badge changes."
                 if catalogue
                 else ""
             ),

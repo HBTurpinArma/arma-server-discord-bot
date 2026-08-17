@@ -638,6 +638,24 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
                 await db.mark_nudged(row["id"])
             assert await db.stale("requested", 48) == [], "no re-nudging within 24h"
 
+        async def panels_are_tracked_for_refresh():
+            assert await db.panels() == [], "nothing tracked yet"
+
+            await db.add_panel("chan-1", "msg-1", True)
+            await db.add_panel("chan-1", "msg-2", False)
+            assert len(await db.panels()) == 2
+
+            # Only panels embedding a catalogue need re-rendering.
+            with_cat = await db.panels(with_catalogue_only=True)
+            assert [r["message_id"] for r in with_cat] == ["msg-1"]
+
+            # Re-posting over the same message must not duplicate the row.
+            await db.add_panel("chan-1", "msg-1", True)
+            assert len(await db.panels()) == 2
+
+            await db.remove_panel("msg-1")
+            assert [r["message_id"] for r in await db.panels()] == ["msg-2"]
+
         async def stats_report():
             stats = await db.stats()
             assert any(r["status"] == "awarded" for r in stats["by_status"])
@@ -745,6 +763,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             ("an open request's levels can be amended", amend_the_request),
             ("timed tests and tabs have nothing to amend", timed_and_tabs_have_nothing_to_amend),
             ("the queue excludes finished work and nudges cool down", queue_and_stale),
+            ("panels are tracked so the catalogue can be refreshed", panels_are_tracked_for_refresh),
             ("stats report status, load and turnaround", stats_report),
             ("ticket cards render the right buttons per status", cards_render_for_every_status),
             ("a timed ticket shows the ladder, then the result", timed_card_and_buttons),

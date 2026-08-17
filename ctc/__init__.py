@@ -302,6 +302,28 @@ class CTCDatabaseManager:
         )
         await self.connection.commit()
 
+    # -------------------------------------------------------------- panels
+
+    async def add_panel(self, channel_id: str, message_id: str, with_catalogue: bool) -> None:
+        await self.connection.execute(
+            "INSERT OR REPLACE INTO ctc_panels (message_id, channel_id, with_catalogue) "
+            "VALUES (?, ?, ?)",
+            (str(message_id), str(channel_id), 1 if with_catalogue else 0),
+        )
+        await self.connection.commit()
+
+    async def panels(self, *, with_catalogue_only: bool = False) -> list[aiosqlite.Row]:
+        sql = "SELECT * FROM ctc_panels"
+        if with_catalogue_only:
+            sql += " WHERE with_catalogue = 1"
+        return await self._many(sql + " ORDER BY posted_at")
+
+    async def remove_panel(self, message_id: str) -> None:
+        await self.connection.execute(
+            "DELETE FROM ctc_panels WHERE message_id = ?", (str(message_id),)
+        )
+        await self.connection.commit()
+
     async def mark_nudged(self, request_id: int) -> None:
         await self.connection.execute(
             "UPDATE ctc_requests SET last_nudged_at = datetime('now') WHERE id = ?", (request_id,)
