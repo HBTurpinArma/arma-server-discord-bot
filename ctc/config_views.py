@@ -213,6 +213,47 @@ class _LevelsSelect(discord.ui.Select):
         await self.parent_view.apply(interaction, edit, notice, key)
 
 
+class _WipLevelsSelect(discord.ui.Select):
+    """Which of a badge's own levels are not yet runnable."""
+
+    def __init__(self, parent: ConfigEditorView, badge: Badge) -> None:
+        self.parent_view = parent
+        super().__init__(
+            placeholder="Levels in development — leave empty if all are ready",
+            min_values=0,
+            max_values=len(badge.levels),
+            row=2,
+            options=[
+                discord.SelectOption(
+                    label=parent.cat.level_name(code),
+                    value=code,
+                    default=code in badge.wip_levels,
+                )
+                for code in badge.levels
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        key = self.parent_view.key
+        badge = self.parent_view.cat.get(key)
+        chosen = [c for c in badge.levels if c in self.values]
+
+        def edit(doc):
+            entry = next(b for b in doc["badges"] if b["key"] == key)
+            if chosen:
+                entry["wipLevels"] = chosen
+            else:
+                entry.pop("wipLevels", None)
+
+        if chosen:
+            notice = f"{', '.join(chosen)} marked in development."
+            if len(chosen) == len(badge.levels):
+                notice += " Nothing left to request, so the badge is hidden from the picker."
+        else:
+            notice = "All levels available."
+        await self.parent_view.apply(interaction, edit, notice, key)
+
+
 class ConfigEditorView(_Editable):
     def __init__(
         self, cog: Any, actor: discord.abc.User, key: str, notice: str | None = None
@@ -225,34 +266,37 @@ class ConfigEditorView(_Editable):
 
         self.add_item(_CategorySelect(self, badge))
         self.add_item(_LevelsSelect(self, badge))
+        # A Tab has no levels, so there is nothing to hold back.
+        if badge.has_levels:
+            self.add_item(_WipLevelsSelect(self, badge))
 
-        rename = discord.ui.Button(label="Rename", row=2)
+        rename = discord.ui.Button(label="Rename", row=3)
         rename.callback = self.on_rename
         self.add_item(rename)
 
-        variants = discord.ui.Button(label="Variants", row=2)
+        variants = discord.ui.Button(label="Variants", row=3)
         variants.callback = self.on_variants
         self.add_item(variants)
 
         timed = discord.ui.Button(
             label="Timed \N{HEAVY CHECK MARK}" if badge.timed else "Timed \N{HEAVY MULTIPLICATION X}",
             style=discord.ButtonStyle.primary if badge.timed else discord.ButtonStyle.secondary,
-            row=2,
+            row=3,
         )
         timed.callback = self.on_timed
         self.add_item(timed)
 
         wip = discord.ui.Button(
-            label="Make available" if badge.wip else "Mark in development", row=2
+            label="Make available" if badge.wip else "Mark in development", row=3
         )
         wip.callback = self.on_wip
         self.add_item(wip)
 
-        back = discord.ui.Button(label="Back", row=3)
+        back = discord.ui.Button(label="Back", row=4)
         back.callback = self.on_back
         self.add_item(back)
 
-        delete = discord.ui.Button(label="Delete", style=discord.ButtonStyle.danger, row=3)
+        delete = discord.ui.Button(label="Delete", style=discord.ButtonStyle.danger, row=4)
         delete.callback = self.on_delete
         self.add_item(delete)
 
@@ -261,6 +305,9 @@ class ConfigEditorView(_Editable):
         if badge is None:
             return "That badge no longer exists."
         levels = " / ".join(self.cat.level_name(lvl) for lvl in badge.levels) or "none (Tab)"
+        if badge.wip_levels:
+            held = ", ".join(self.cat.level_name(lvl) for lvl in badge.wip_levels)
+            levels += f"  (in development: {held})"
         lines = [
             f"{self.notice}\n" if self.notice else None,
             f"**{badge.name}**  `{badge.key}`",

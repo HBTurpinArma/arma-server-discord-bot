@@ -401,6 +401,33 @@ def _() -> None:
     assert cat.awardable_levels("cqc", None) == ["B", "A", "E"], "Master is not runnable yet"
 
 
+@check("the editor can mark individual levels in development")
+def _() -> None:
+    from ctc.config_views import ConfigEditorView
+
+    raw = json.loads(catalogue_module.CATALOGUE_PATH.read_text(encoding="utf-8"))
+    for entry in raw["badges"]:
+        if entry["key"] == "grenadier":
+            entry["wipLevels"] = ["A", "E"]
+    cat = catalogue_module.Catalogue(raw)
+    cog = FakeCog(cat)
+
+    view = ConfigEditorView(cog, FakeUser(), "grenadier")
+    assert_component_limits(view, "configEditor/wipLevels")
+
+    wip = select_named(view, "in development")
+    assert wip is not None, "the editor offers a levels-in-development picker"
+    assert [o.value for o in wip.options] == ["B", "A", "E"], "its own ladder, nothing else"
+    assert [o.value for o in wip.options if o.default] == ["A", "E"], "prefilled from the badge"
+    assert wip.min_values == 0, "clearing it marks everything available"
+    assert "in development: Advanced, Expert" in view.content()
+
+    # A Tab has no levels, so the picker is not offered at all.
+    tab = ConfigEditorView(cog, FakeUser(), "airborne")
+    assert_component_limits(tab, "configEditor/tab")
+    assert select_named(tab, "in development") is None
+
+
 @check("the panel renders with and without the catalogue")
 def _() -> None:
     plain = entry_point_payload(CAT, with_catalogue=False)
