@@ -176,6 +176,18 @@ development" instead, which hides it from the picker without breaking history.
 Editing the file by hand also works and is better for bulk changes; restart
 afterwards.
 
+Panels posted by `/badge panel` are tracked in `ctc_panels`, and any that embed
+the catalogue are re-rendered whenever `/badge config` changes it, so a pinned
+panel cannot drift from the live list.
+
+A panel posted before tracking existed is not in that table and will never
+refresh. Adopt it with `/badge panel message_id:<id>`, run in its channel: the
+message is rewritten in place and tracked from then on, so the pin survives.
+Right-click the panel and Copy Message ID to get the value. A panel that has been deleted is dropped
+from tracking the next time a refresh runs. Editing `catalogue.json` by hand and
+restarting does not trigger a refresh; re-run `/badge panel` or make any change
+through `/badge config`.
+
 ## Tests
 
 ```bash
