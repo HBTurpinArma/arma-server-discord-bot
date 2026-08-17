@@ -354,9 +354,13 @@ def _() -> None:
     assert [o.value for o in select.options] == ["B"]
     assert select.max_values == 1
 
-    text = "\n".join(f.value for f in catalogue_embed(cat).fields)
-    assert "**Grenadier** B" in text
-    assert "A, E in development" in text
+    # The whole ladder stays visible, with the unrunnable levels struck out.
+    embed = catalogue_embed(cat)
+    text = "\n".join(f.value for f in embed.fields)
+    assert "**Grenadier** B / ~~A~~ / ~~E~~" in text, text
+
+    key = next(f.value for f in embed.fields if f.name == "Key")
+    assert "~~Struck through~~" in key, "the key explains the strikethrough"
 
 
 @check("a badge with every level in development drops out of the picker")

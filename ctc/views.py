@@ -84,12 +84,14 @@ def catalogue_embed(cat: Catalogue) -> discord.Embed:
                 pending.append(badge.name)
                 continue
             else:
-                line = f"**{badge.name}** {' / '.join(available)}"
+                # Show the whole ladder and strike what cannot be run yet, so
+                # the shape of the progression stays visible.
+                ladder = " / ".join(
+                    lvl if lvl in available else f"~~{lvl}~~" for lvl in badge.levels
+                )
+                line = f"**{badge.name}** {ladder}"
                 if badge.timed:
                     line += " · by result"
-                if badge.wip_levels:
-                    soon = ", ".join(badge.wip_levels)
-                    line += f" *· {soon} in development*"
             lines.append(line)
 
         if lines:
@@ -106,14 +108,14 @@ def catalogue_embed(cat: Catalogue) -> discord.Embed:
             inline=False,
         )
 
-    embed.add_field(
-        name="Key",
-        value=(
-            "**B** basic · **A** advanced · **E** expert · **M** master\n"
-            "**Tab** no levels · **by result** your score sets the level, one per run"
-        ),
-        inline=False,
-    )
+    key = [
+        "**B** basic · **A** advanced · **E** expert · **M** master",
+        "**Tab** no levels · **by result** your score sets the level, one per run",
+    ]
+    if any(b.partly_wip for b in cat.all()):
+        key.append("~~Struck through~~ still in development, not yet requestable")
+
+    embed.add_field(name="Key", value="\n".join(key), inline=False)
     embed.set_footer(
         text=f"{len(cat.all())} badges · {len(cat.requestable())} available to request"
     )
