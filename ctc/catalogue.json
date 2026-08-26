@@ -7,6 +7,7 @@
   },
   "_wip": "wip: true hides a badge from the request picker but keeps it in the catalogue, marked Work in Progress. Remove the flag to open it up.",
   "_variants": "variants: [...] — a badge run in several forms (e.g. Gun Range by weapon). The instructor picks which one was run when recording the result. Max 25.",
+  "_extraTrainers": "extraTrainers: [\"<@123…>\"] — people or roles pinged alongside the instructor roles for that badge only, for badges not every instructor can run. Use <@id> for a person, <@&id> for a role.",
   "categories": [
     {
       "key": "tabs",
@@ -193,6 +194,9 @@
         "B",
         "A",
         "E"
+      ],
+      "extraTrainers": [
+        "<@189362064995778560>"
       ]
     },
     {
@@ -203,6 +207,9 @@
         "B",
         "A",
         "E"
+      ],
+      "extraTrainers": [
+        "<@189362064995778560>"
       ]
     },
     {

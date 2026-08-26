@@ -55,6 +55,32 @@ class FakeUser:
         self.display_name = "Tester"
 
 
+class FakeRole:
+    def __init__(self, rid: int) -> None:
+        self.id = rid
+
+
+class FakeMember(discord.Member):
+    """A member that satisfies ``isinstance(user, discord.Member)``.
+
+    ``holds_any`` checks the type before reading roles, so a plain stand-in
+    would be treated as a DM user and silently denied every permission. ``id``
+    and ``roles`` are properties on the real class, hence the overrides.
+    """
+
+    def __init__(self, uid: int, roles=()) -> None:
+        self._uid = uid
+        self._roles = [FakeRole(r) for r in roles]
+
+    @property
+    def id(self) -> int:
+        return self._uid
+
+    @property
+    def roles(self):
+        return self._roles
+
+
 class FakeCog:
     """Just enough of the cog for the views to build."""
 
@@ -75,8 +101,20 @@ def buttons(view: discord.ui.View) -> list[discord.ui.Button]:
     return [u for u in map(unwrap, view.children) if isinstance(u, discord.ui.Button)]
 
 
-def selects(view: discord.ui.View) -> list[discord.ui.Select]:
-    return [u for u in map(unwrap, view.children) if isinstance(u, discord.ui.Select)]
+#: Every select kind, listed by name rather than by their shared base class:
+#: the base lives in a module shadowed by the ``discord.ui.select`` decorator,
+#: and the option-list ``Select`` is not an ancestor of the others. Matching on
+#: ``Select`` alone would quietly skip a MentionableSelect and let a view
+#: exceed five rows without this noticing.
+SELECT_TYPES = tuple(
+    getattr(discord.ui, name)
+    for name in ("Select", "UserSelect", "RoleSelect", "MentionableSelect", "ChannelSelect")
+    if hasattr(discord.ui, name)
+)
+
+
+def selects(view: discord.ui.View):
+    return [u for u in map(unwrap, view.children) if isinstance(u, SELECT_TYPES)]
 
 
 def assert_component_limits(view: discord.ui.View, label: str) -> None:
@@ -87,7 +125,11 @@ def assert_component_limits(view: discord.ui.View, label: str) -> None:
     assert estimated <= 5, f"{label}: needs {estimated} rows, max 5"
 
     for select in selects(view):
-        assert len(select.options) <= 25, f"{label}: select has {len(select.options)} options"
+        # Only option-backed selects carry a list; the user/role/mentionable
+        # ones are populated by Discord itself.
+        options = getattr(select, "options", None)
+        if options is not None:
+            assert len(options) <= 25, f"{label}: select has {len(options)} options"
         assert select.max_values <= 25, f"{label}: max_values {select.max_values} above 25"
 
 
@@ -696,11 +738,53 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             assert any(r["status"] == "awarded" for r in stats["by_status"])
             assert stats["oldest_open"] is not None
 
+        async def assigning_a_request():
+            rows = await db.create_group(
+                guild_id="g", member_id="m9", member_name="Pvt. Nine", notes=None,
+                items=[("rotary", ["B"])],
+            )
+            rid = rows[0]["id"]
+
+            # Assigning unclaimed work picks it up in the same move.
+            done = await db.assign(rid, instructor_id="900", instructor_name="Kondor")
+            assert done["status"] == "claimed", done["status"]
+            assert done["instructor_id"] == "900"
+            assert done["instructor_name"] == "Kondor"
+            assert done["claimed_at"], "claiming must be stamped"
+
+            # Reassigning is not a state change, so it must not trip the
+            # claimed -> claimed guard that transition() enforces.
+            moved = await db.assign(rid, instructor_id="901", instructor_name="Other")
+            assert moved["status"] == "claimed"
+            assert moved["instructor_id"] == "901"
+            assert moved["instructor_name"] == "Other"
+
+            # That guard must stay in place for ordinary claims.
+            try:
+                await db.transition(rid, "claimed", instructor_id="902", instructor_name="No")
+            except TransitionError:
+                pass
+            else:
+                raise AssertionError("transition should still refuse claimed -> claimed")
+
+            # Finished work cannot be handed to anyone.
+            await db.transition(rid, "cancelled")
+            try:
+                await db.assign(rid, instructor_id="903", instructor_name="Nope")
+            except TransitionError as error:
+                assert "cancelled" in str(error), error
+            else:
+                raise AssertionError("a cancelled request must not be assignable")
+
         async def cards_render_for_every_status():
             row = dict(state["rows"][1])
+            ellipsis = "…"
             for status, expected in [
-                ("requested", ["Claim", "Cancel"]),
-                ("claimed", ["All passed", "Partial", "Release", "Cancel"]),
+                ("requested", ["Claim", "Cancel", f"Assign{ellipsis}"]),
+                (
+                    "claimed",
+                    ["All passed", "Partial", "Release", f"Reassign{ellipsis}", "Cancel"],
+                ),
                 ("completed", ["Open taw.net", "Awarded on taw.net", "Reopen"]),
                 ("awarded", []),
                 ("cancelled", []),
@@ -716,7 +800,12 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             row = dict(state["timed"])
             row.update(status="claimed", levels_achieved=None, variant=None, instructor_id="ti1")
             view = ticket_view(CAT, row)
-            assert labels(view) == ["Record result", "Release", "Cancel"]
+            assert labels(view) == [
+                "Record result",
+                "Release",
+                "Reassign…",
+                "Cancel",
+            ]
             embed = ticket_embed(CAT, row)
             timed_field = next(f for f in embed.fields if "Timed test" in f.name)
             assert "set by the score achieved" in timed_field.value
@@ -800,6 +889,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             ("the queue excludes finished work and nudges cool down", queue_and_stale),
             ("panels are tracked so the catalogue can be refreshed", panels_are_tracked_for_refresh),
             ("stats report status, load and turnaround", stats_report),
+            ("a request can be assigned, reassigned and picked up", assigning_a_request),
             ("ticket cards render the right buttons per status", cards_render_for_every_status),
             ("a timed ticket shows the ladder, then the result", timed_card_and_buttons),
             ("a partial result is spelled out on the card", partial_card_spells_it_out),
@@ -810,6 +900,271 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         await connection.close()
     return results
+
+
+
+@check("extraTrainers must be real Discord mentions")
+def _() -> None:
+    import copy
+
+    raw = json.loads((ROOT / "catalogue.json").read_text(encoding="utf-8"))
+    for bad in ("189362064995778560", "<@abc>", "@someone", "<@&12>"):
+        doc = copy.deepcopy(raw)
+        doc["badges"][0]["extraTrainers"] = [bad]
+        try:
+            catalogue_module.Catalogue(doc)
+        except catalogue_module.CatalogueError:
+            continue
+        raise AssertionError(f"catalogue accepted {bad!r} as a mention")
+
+    # A role mention is as valid as a user mention.
+    doc = copy.deepcopy(raw)
+    doc["badges"][0]["extraTrainers"] = ["<@&1001589735581552731>"]
+    catalogue_module.Catalogue(doc)
+
+
+@check("split_mentions sorts users from roles")
+def _() -> None:
+    from cogs.ctc import split_mentions
+
+    users, roles = split_mentions(
+        ["<@&111111111111111111>", "<@189362064995778560>", "<@!222222222222222222>"]
+    )
+    assert roles == [111111111111111111], roles
+    assert users == [189362064995778560, 222222222222222222], users
+    assert split_mentions([]) == ([], [])
+
+
+@check("the aviation badges carry their extra trainer")
+def _() -> None:
+    # Fixed Wing and Rotary cannot be run by every instructor, so they name
+    # someone specific. If this ever trips, the catalogue was edited rather
+    # than the test being wrong -- check that was intended.
+    for key in ("fixed_wing", "rotary"):
+        extra = CAT.extra_trainers(key)
+        assert extra, f"{key} lost its extra trainer"
+        assert all(m.startswith("<@") for m in extra), extra
+    assert CAT.extra_trainers("gun_range") == []
+
+
+@check("the opening ping spoilers the tags and never pings an empty set")
+def _() -> None:
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    assert "We will assist with this as soon as we can." in src
+    # The old wording named the roles inline; it must be gone entirely.
+    assert "will be able to assist with this when they can" not in src
+    # Tags go inside a spoiler, and only when there is something to tag.
+    assert 'greeting += ' in src
+    assert '" ".join(pings)' in src
+    assert "if pings:" in src
+    # The spoiler bars must actually be in the source that builds the line.
+    assert src.count("||") >= 2
+
+
+
+@check("the badge editor offers a trainers screen and still fits five rows")
+def _() -> None:
+    from ctc.config_views import ConfigEditorView
+
+    for key in ("rotary", "medical", "airborne"):
+        view = ConfigEditorView(FakeCog(CAT), FakeUser(), key)
+        assert_component_limits(view, f"editor {key}")
+        names = labels(view)
+        assert any((n or "").startswith("Trainers") for n in names), names
+        # Row 3 is the edit-action row and is now full; a sixth button there
+        # would silently overflow into another row.
+        row3 = [b for b in buttons(view) if b.row == 3]
+        assert len(row3) <= 5, f"{key}: {len(row3)} buttons on row 3"
+
+    # The count is surfaced on the button, so it is visible without opening it.
+    def trainers_label(key: str) -> str:
+        view = ConfigEditorView(FakeCog(CAT), FakeUser(), key)
+        return button_named(view, "Trainers").label
+
+    assert trainers_label("rotary") == "Trainers (1)"
+    assert trainers_label("medical") == "Trainers"
+
+
+@check("the trainers screen pre-selects who is already set")
+def _() -> None:
+    import discord
+
+    from ctc.config_views import ExtraTrainersView
+
+    view = ExtraTrainersView(FakeCog(CAT), FakeUser(), "rotary")
+    assert_component_limits(view, "trainers rotary")
+    picker = selects(view)[0]
+    assert isinstance(picker, discord.ui.MentionableSelect), type(picker)
+    assert picker.min_values == 0, "must allow clearing by picking nothing"
+
+    defaults = picker.default_values
+    assert len(defaults) == 1, defaults
+    assert defaults[0].id == 189362064995778560, defaults
+    assert defaults[0].type is discord.SelectDefaultValueType.user, defaults[0].type
+
+    # Clear only appears when there is something to clear.
+    assert "Clear" in labels(view)
+    assert "Clear" not in labels(ExtraTrainersView(FakeCog(CAT), FakeUser(), "medical"))
+    assert "Back" in labels(view)
+
+
+@check("a picked role and a picked user become the right mentions")
+def _() -> None:
+    from ctc.config_views import _as_default, _as_mention
+
+    class FakeRole(discord.Role):
+        # A real Role subclass, so the isinstance branch in _as_mention is the
+        # thing under test rather than a stand-in for it.
+        def __init__(self) -> None:
+            self.id = 1001589735581552731
+
+    class FakeMember:
+        id = 189362064995778560
+
+    assert _as_mention(FakeRole()) == "<@&1001589735581552731>"
+    assert _as_mention(FakeMember()) == "<@189362064995778560>"
+
+    # And back again, so a saved value re-selects itself next time.
+    assert _as_default("<@&1001589735581552731>").type is discord.SelectDefaultValueType.role
+    assert _as_default("<@189362064995778560>").type is discord.SelectDefaultValueType.user
+    assert _as_default("<@189362064995778560>").id == 189362064995778560
+
+
+
+@check("an extra trainer can work their own badge and nothing else")
+def _() -> None:
+    from cogs.ctc import CTC
+
+    INSTRUCTOR_ROLE = 1001588316602368090
+    AVIATOR = 189362064995778560
+    OUTSIDER = 999999999999999999
+
+    cog = CTC.__new__(CTC)
+    cog._catalogue = CAT
+    cog.bot = type("B", (), {"config": {"discord": {"combat_training_centre": {
+        "instructor_role_id": INSTRUCTOR_ROLE}}}})()
+
+    instructor = FakeMember(555555555555555555, [INSTRUCTOR_ROLE])
+    aviator = FakeMember(AVIATOR)
+    outsider = FakeMember(OUTSIDER)
+
+    # The named aviator works Rotary and Fixed Wing...
+    for key in ("rotary", "fixed_wing"):
+        assert cog.can_work(aviator, key), f"aviator locked out of {key}"
+    # ...but is nobody special on a badge that does not name them.
+    assert not cog.can_work(aviator, "medical"), "aviator should not reach Medical"
+
+    # Instructors keep working everything, including the aviation badges.
+    for key in ("rotary", "medical", "airborne"):
+        assert cog.can_work(instructor, key), f"instructor locked out of {key}"
+
+    # Everyone else stays out.
+    for key in ("rotary", "medical"):
+        assert not cog.can_work(outsider, key), f"outsider reached {key}"
+
+    # A missing or unknown badge key must not throw or grant anything.
+    assert not cog.can_work(aviator, None)
+    assert not cog.can_work(aviator, "no_such_badge")
+
+
+@check("a role named as an extra trainer also grants access")
+def _() -> None:
+    import copy
+
+    from cogs.ctc import CTC
+
+    SPECIALIST_ROLE = 1001589735581552731
+
+    raw = copy.deepcopy(json.loads((ROOT / "catalogue.json").read_text(encoding="utf-8")))
+    next(b for b in raw["badges"] if b["key"] == "medical")["extraTrainers"] = [
+        f"<@&{SPECIALIST_ROLE}>"
+    ]
+    cat = catalogue_module.Catalogue(raw)
+
+    cog = CTC.__new__(CTC)
+    cog._catalogue = cat
+    cog.bot = type("B", (), {"config": {"discord": {"combat_training_centre": {
+        "instructor_role_id": 1001588316602368090}}}})()
+
+    holder = FakeMember(777777777777777777, [SPECIALIST_ROLE])
+    assert cog.can_work(holder, "medical"), "role-based extra trainer locked out"
+    assert not cog.can_work(holder, "rotary"), "role should not carry to other badges"
+
+
+@check("named trainers are added to the thread, roles cannot be")
+def _() -> None:
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    # The requester and the badge's named people are added in one pass.
+    assert "for uid in (int(row[\"member_id\"]), *extra_users):" in src
+    assert "extra_users, _ = split_mentions(extra)" in src
+    # Permission alone is not enough on a private thread, so this must stay.
+    assert "add_user" in src
+
+
+
+@check("only the assign role may set who is working on a request")
+def _() -> None:
+    from cogs.ctc import CTC
+
+    INSTRUCTOR = 1001588316602368090
+    SPECIALIST = 1001589735581552731
+
+    def cog_with(**ctc_settings):
+        cog = CTC.__new__(CTC)
+        cog._catalogue = CAT
+        cog.bot = type("B", (), {"config": {"discord": {
+            "combat_training_centre": {"instructor_role_id": INSTRUCTOR, **ctc_settings}}}})()
+        return cog
+
+    instructor = FakeMember(1, [INSTRUCTOR])
+    specialist = FakeMember(2, [SPECIALIST])
+    nobody = FakeMember(3)
+
+    # Unset: falls back to the instructor roles, so it works out of the box.
+    loose = cog_with()
+    assert loose.can_assign(instructor)
+    assert not loose.can_assign(specialist)
+    assert not loose.can_assign(nobody)
+
+    # Set: narrows to exactly that role, instructors included.
+    tight = cog_with(assign_role_id=SPECIALIST)
+    assert tight.can_assign(specialist)
+    assert not tight.can_assign(instructor), "narrowing must actually exclude"
+    assert not tight.can_assign(nobody)
+
+    # A list of roles works, as everywhere else.
+    both = cog_with(assign_role_id=[SPECIALIST, INSTRUCTOR])
+    assert both.can_assign(specialist) and both.can_assign(instructor)
+    assert not both.can_assign(nobody)
+
+
+@check("the assign picker preselects whoever holds the request")
+def _() -> None:
+    from ctc.views import AssignView
+
+    claimed = {"id": 1, "instructor_id": "189362064995778560", "badge_key": "rotary",
+               "levels": "B", "member_id": "5", "status": "claimed"}
+    view = AssignView(FakeCog(CAT), claimed)
+    assert_component_limits(view, "assign")
+    picker = selects(view)[0]
+    assert isinstance(picker, discord.ui.UserSelect), type(picker)
+    assert picker.min_values == 1 and picker.max_values == 1, "exactly one person"
+    assert [d.id for d in picker.default_values] == [189362064995778560]
+
+    # Nothing preselected on unclaimed work.
+    unclaimed = {**claimed, "instructor_id": None, "status": "requested"}
+    assert selects(AssignView(FakeCog(CAT), unclaimed))[0].default_values == []
+
+
+@check("assign is a real ticket action and survives a restart")
+def _() -> None:
+    # The button is a DynamicItem, so the action must be in the template or the
+    # custom_id stops matching after a restart and the button goes dead.
+    assert "assign" in TICKET_ACTIONS
+    pattern = TicketButton.__discord_ui_compiled_template__
+    assert pattern.fullmatch("ctc:assign:42"), "assign custom_id must match the template"
+    # And it must not collide with the panel button, as an earlier action did.
+    assert not pattern.fullmatch(PANEL_CUSTOM_ID)
 
 
 def main() -> int:

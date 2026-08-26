@@ -224,6 +224,40 @@ class CTCDatabaseManager:
         await self.connection.commit()
         return await self.by_id(request_id)  # type: ignore[return-value]
 
+    async def assign(
+        self, request_id: int, *, instructor_id: str, instructor_name: str
+    ) -> aiosqlite.Row:
+        """Put a named instructor on a request, whoever is on it now.
+
+        Distinct from ``transition`` because reassigning is not a state change:
+        a claimed request stays claimed, it just changes hands. The status
+        machine rejects claimed -> claimed, and rightly so — that guard is what
+        stops two people claiming the same ticket in a race.
+
+        Unclaimed work is picked up as part of the same move, since assigning
+        someone to a request nobody has taken is the common case.
+        """
+        row = await self.by_id(request_id)
+        if row is None:
+            raise TransitionError(f"Request #{request_id} not found.")
+        if row["status"] in ("awarded", "cancelled"):
+            raise TransitionError(
+                f"Request #{request_id} is {row['status']} — there is nothing left to work on."
+            )
+
+        sets = ["instructor_id = ?", "instructor_name = ?"]
+        params: list[Any] = [str(instructor_id), instructor_name]
+        if row["status"] == "requested":
+            sets.append("status = 'claimed'")
+            sets.append("claimed_at = datetime('now')")
+
+        params.append(request_id)
+        await self.connection.execute(
+            f"UPDATE ctc_requests SET {', '.join(sets)} WHERE id = ?", params
+        )
+        await self.connection.commit()
+        return await self.by_id(request_id)  # type: ignore[return-value]
+
     async def amend_request(
         self, request_id: int, *, levels: Sequence[str], actor_id: str, actor_name: str
     ) -> aiosqlite.Row:

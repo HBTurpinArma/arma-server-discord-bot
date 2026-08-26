@@ -16,6 +16,9 @@ from .catalogue import Badge, Catalogue, CatalogueError
 
 COLOUR = 0x5865F2
 
+#: Discord caps a select at 25 picks, and the catalogue is validated to match.
+MAX_EXTRA_TRAINERS = 25
+
 
 def _describe(badge: Badge) -> str:
     return {"timed": "Timed test", "graded": "Graded", "tab": "Tab"}[badge.kind]
@@ -278,6 +281,15 @@ class ConfigEditorView(_Editable):
         variants.callback = self.on_variants
         self.add_item(variants)
 
+        trainers = discord.ui.Button(
+            label=f"Trainers ({len(badge.extra_trainers)})"
+            if badge.extra_trainers
+            else "Trainers",
+            row=3,
+        )
+        trainers.callback = self.on_trainers
+        self.add_item(trainers)
+
         timed = discord.ui.Button(
             label="Timed \N{HEAVY CHECK MARK}" if badge.timed else "Timed \N{HEAVY MULTIPLICATION X}",
             style=discord.ButtonStyle.primary if badge.timed else discord.ButtonStyle.secondary,
@@ -315,6 +327,8 @@ class ConfigEditorView(_Editable):
             f"Levels — {levels}",
             f"Type — {_describe(badge)}",
             f"Variants — {', '.join(badge.variants) if badge.variants else 'none'}",
+            "Extra trainers — "
+            + (" ".join(badge.extra_trainers) if badge.extra_trainers else "none"),
             "Availability — "
             + (
                 "\N{CONSTRUCTION SIGN} in development"
@@ -330,6 +344,10 @@ class ConfigEditorView(_Editable):
 
     async def on_variants(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(VariantsModal(self.cog, self.actor, self.key))
+
+    async def on_trainers(self, interaction: discord.Interaction) -> None:
+        view = ExtraTrainersView(self.cog, self.actor, self.key)
+        await interaction.response.edit_message(content=view.content(), view=view)
 
     async def on_timed(self, interaction: discord.Interaction) -> None:
         key = self.key
@@ -364,6 +382,113 @@ class ConfigEditorView(_Editable):
     async def on_delete(self, interaction: discord.Interaction) -> None:
         used = await self.cog.database.counts_for_badge(self.key)
         view = DeleteConfirmView(self.cog, self.actor, self.key, used)
+        await interaction.response.edit_message(content=view.content(), view=view)
+
+
+def _as_mention(value: Any) -> str:
+    """A picked user or role as the literal mention the catalogue stores."""
+    return f"<@&{value.id}>" if isinstance(value, discord.Role) else f"<@{value.id}>"
+
+
+def _as_default(mention: str) -> discord.SelectDefaultValue:
+    """A stored mention as a pre-selected entry in the picker."""
+    digits = int("".join(c for c in mention if c.isdigit()))
+    kind = (
+        discord.SelectDefaultValueType.role
+        if mention.startswith("<@&")
+        else discord.SelectDefaultValueType.user
+    )
+    return discord.SelectDefaultValue(id=digits, type=kind)
+
+
+class _TrainerSelect(discord.ui.MentionableSelect):
+    """People and roles in one menu.
+
+    A mentionable select is the only control that takes both, which is what
+    lets ``extraTrainers`` stay a single field instead of splitting into a
+    user list and a role list.
+    """
+
+    def __init__(self, parent: ExtraTrainersView, badge: Badge) -> None:
+        super().__init__(
+            placeholder="Pick the people or roles to add to this badge's ping",
+            min_values=0,
+            max_values=MAX_EXTRA_TRAINERS,
+            row=0,
+            default_values=[_as_default(m) for m in badge.extra_trainers],
+        )
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        key = self.parent_view.key
+        chosen = [_as_mention(v) for v in self.values]
+        # Dedupe but keep the order they were picked in.
+        picked = list(dict.fromkeys(chosen))
+
+        def edit(doc):
+            entry = next(b for b in doc["badges"] if b["key"] == key)
+            if picked:
+                entry["extraTrainers"] = picked
+            else:
+                entry.pop("extraTrainers", None)
+
+        notice = (
+            f"Extra trainers set: {' '.join(picked)}"
+            if picked
+            else "Extra trainers cleared."
+        )
+        await self.parent_view.apply(interaction, edit, notice, key)
+
+
+class ExtraTrainersView(_Editable):
+    """Who gets pinged for one badge on top of the instructor roles."""
+
+    def __init__(
+        self, cog: Any, actor: discord.abc.User, key: str, notice: str | None = None
+    ) -> None:
+        super().__init__(cog, actor, notice)
+        self.key = key
+        badge = self.cat.get(key)
+        if badge is None:
+            return
+
+        self.add_item(_TrainerSelect(self, badge))
+
+        if badge.extra_trainers:
+            clear = discord.ui.Button(label="Clear", style=discord.ButtonStyle.danger, row=1)
+            clear.callback = self.on_clear
+            self.add_item(clear)
+
+        back = discord.ui.Button(label="Back", row=1)
+        back.callback = self.on_back
+        self.add_item(back)
+
+    def content(self) -> str:
+        badge = self.cat.get(self.key)
+        if badge is None:
+            return "That badge no longer exists."
+        current = " ".join(badge.extra_trainers) if badge.extra_trainers else "none"
+        lines = [
+            f"{self.notice}\n" if self.notice else None,
+            f"**{badge.name}** — extra trainers",
+            f"Currently — {current}",
+            "",
+            "These are pinged alongside the instructor roles when someone "
+            "requests this badge, for badges not every instructor can run.",
+            "-# Picking replaces the whole list. Choosing nothing clears it.",
+        ]
+        return "\n".join(line for line in lines if line is not None)
+
+    async def on_clear(self, interaction: discord.Interaction) -> None:
+        key = self.key
+
+        def edit(doc):
+            next(b for b in doc["badges"] if b["key"] == key).pop("extraTrainers", None)
+
+        await self.apply(interaction, edit, "Extra trainers cleared.", key)
+
+    async def on_back(self, interaction: discord.Interaction) -> None:
+        view = ConfigEditorView(self.cog, self.actor, self.key)
         await interaction.response.edit_message(content=view.content(), view=view)
 
 

@@ -204,7 +204,9 @@ def ticket_embed(cat: Catalogue, row: Any) -> discord.Embed:
 
 #: Ticket actions, named explicitly in the template. A loose ``[a-z]+`` would
 #: swallow any other ``ctc:*:*`` custom_id — the panel button did exactly that.
-TICKET_ACTIONS = ("claim", "cancel", "release", "complete", "result", "award", "reopen")
+TICKET_ACTIONS = (
+    "claim", "cancel", "release", "complete", "result", "award", "reopen", "assign",
+)
 
 
 class TicketButton(
@@ -251,7 +253,11 @@ class TicketButton(
 
 
 def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> discord.ui.View:
-    """Buttons appropriate to the ticket's current state."""
+    """Buttons appropriate to the ticket's current state.
+
+    Every button is shown to everyone, as Discord has no per-viewer components;
+    who may press what is enforced when it is pressed.
+    """
     view = discord.ui.View(timeout=None)
     rid = int(row["id"])
     status = row["status"]
@@ -266,6 +272,7 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
             )
         )
         view.add_item(TicketButton("cancel", rid, label="Cancel"))
+        view.add_item(TicketButton("assign", rid, label="Assign…"))
 
     elif status == "claimed":
         # A badge with variants always goes through the form — there is no
@@ -290,6 +297,7 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
                     TicketButton("result", rid, label="Partial", emoji="\N{WARNING SIGN}")
                 )
         view.add_item(TicketButton("release", rid, label="Release"))
+        view.add_item(TicketButton("assign", rid, label="Reassign…"))
         view.add_item(TicketButton("cancel", rid, label="Cancel", style=discord.ButtonStyle.danger))
 
     elif status == "completed":
@@ -310,6 +318,49 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
         view.add_item(TicketButton("reopen", rid, label="Reopen"))
 
     return view
+
+
+
+class AssignView(discord.ui.View):
+    """Pick who is working on a request.
+
+    Ephemeral and short-lived: it is opened from the ticket, used once, and
+    thrown away, so it needs no persistent custom_id.
+    """
+
+    def __init__(self, cog: Any, row: Any) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.row = row
+        current = row["instructor_id"]
+        self.add_item(
+            _AssignSelect(
+                self,
+                default=[
+                    discord.SelectDefaultValue(
+                        id=int(current), type=discord.SelectDefaultValueType.user
+                    )
+                ]
+                if current
+                else [],
+            )
+        )
+
+
+class _AssignSelect(discord.ui.UserSelect):
+    def __init__(self, parent: AssignView, default: list) -> None:
+        super().__init__(
+            placeholder="Who is running this test?",
+            min_values=1,
+            max_values=1,
+            default_values=default,
+        )
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.cog.assign_request(
+            interaction, self.parent_view.row, self.values[0]
+        )
 
 
 # --------------------------------------------------------- request flow

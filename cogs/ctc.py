@@ -28,6 +28,7 @@ from ctc import catalogue as catalogue_module
 from ctc.config_views import ConfigRootView
 from ctc.views import (
     AmendView,
+    AssignView,
     BadgePickerView,
     LevelView,
     PanelView,
@@ -56,9 +57,29 @@ DEFAULTS: dict[str, Any] = {
     "hide_thread_notices": True,
     "archive_on_award": True,
     "lock_on_award": False,
+    "assign_role_id": 0,
     "nudge_unclaimed_hours": 48,
     "nudge_unawarded_hours": 72,
 }
+
+
+def split_mentions(mentions: Sequence[str]) -> tuple[list[int], list[int]]:
+    """Split literal Discord mentions into (user ids, role ids).
+
+    Needed because ``allowed_mentions`` wants ids by kind, while the catalogue
+    stores whole mentions so a badge can name a person or a role in one field.
+    Anything unrecognised is dropped rather than raised on: the catalogue
+    already rejects malformed entries at load, and a stray mention should never
+    be the reason a request fails to post.
+    """
+    users: list[int] = []
+    roles: list[int] = []
+    for mention in mentions:
+        digits = "".join(c for c in mention if c.isdigit())
+        if not digits:
+            continue
+        (roles if mention.startswith("<@&") else users).append(int(digits))
+    return users, roles
 
 
 class CTC(commands.Cog, name="ctc"):
@@ -152,6 +173,36 @@ class CTC(commands.Cog, name="ctc"):
             return True  # unset means "anyone", for local testing only
         return self.holds_any(user, "instructor_role_id")
 
+    def is_extra_trainer(self, user: discord.abc.User, badge_key: str | None) -> bool:
+        """True if this badge names this user, or a role they hold.
+
+        Scoped to one badge on purpose: being the Rotary specialist grants
+        nothing on a Medical ticket.
+        """
+        mentions = self.catalogue.extra_trainers(badge_key or "")
+        if not mentions:
+            return False
+        user_ids, extra_roles = split_mentions(mentions)
+        if user.id in user_ids:
+            return True
+        held = {role.id for role in getattr(user, "roles", [])}
+        return bool(held & set(extra_roles))
+
+    def can_work(self, user: discord.abc.User, badge_key: str | None) -> bool:
+        """Who may act on a ticket: instructors, plus the badge's own trainers."""
+        return self.is_instructor(user) or self.is_extra_trainer(user, badge_key)
+
+    def can_assign(self, user: discord.abc.User) -> bool:
+        """Who may put someone else's name on a request.
+
+        Falls back to the instructor roles rather than Manage Server, so the
+        ability exists out of the box and narrowing it to, say, Training
+        Specialists is a deliberate choice rather than the default.
+        """
+        if self.role_ids("assign_role_id"):
+            return self.holds_any(user, "assign_role_id")
+        return self.is_instructor(user)
+
     def has_role(self, user: discord.abc.User, setting: str) -> bool:
         """True if any configured role is held.
 
@@ -186,7 +237,7 @@ class CTC(commands.Cog, name="ctc"):
         settings = self.settings
         is_forum = isinstance(channel, discord.ForumChannel)
         role_ids = self.role_ids("instructor_role_id")
-        mention = self.role_mention("instructor_role_id", "A Training Instructor")
+        base_pings = [f"<@&{i}>" for i in role_ids]
 
         for row in rows:
             embed = ticket_embed(self.catalogue, row)
@@ -238,18 +289,42 @@ class CTC(commands.Cog, name="ctc"):
             if message is None:
                 message = await target.send(embed=embed, view=view)
 
-            # Subscribe the requester so they follow their own ticket. Best
-            # effort — a failure here must not lose the request.
-            if thread_id:
-                with contextlib.suppress(discord.HTTPException):
-                    await target.add_user(discord.Object(id=int(row["member_id"])))
+            # Some badges can only be run by particular people, so the pings
+            # are assembled per badge rather than once for the whole batch.
+            extra = self.catalogue.extra_trainers(row["badge_key"])
+            pings = base_pings + [m for m in extra if m not in base_pings]
 
-            await target.send(
+            # Subscribe the requester so they follow their own ticket, and the
+            # badge's named trainers so they can actually reach a private
+            # thread they are allowed to claim. Best effort — a failure here
+            # must not lose the request.
+            #
+            # Only named *people* can be added; Discord has no way to add a
+            # role to a thread, so role-based extra trainers still need Manage
+            # Threads on the parent channel to see it.
+            if thread_id:
+                extra_users, _ = split_mentions(extra)
+                for uid in (int(row["member_id"]), *extra_users):
+                    with contextlib.suppress(discord.HTTPException):
+                        await target.add_user(discord.Object(id=uid))
+            greeting = (
                 f"Hello <@{row['member_id']}>, thanks for raising this request! "
-                f"{mention} will be able to assist with this when they can.",
+                "We will assist with this as soon as we can."
+            )
+            if pings:
+                # Spoilered so the thread reads as a greeting rather than a wall
+                # of role tags. Discord still delivers the notifications.
+                greeting += "\n||" + " ".join(pings) + "||"
+
+            ping_users, ping_roles = split_mentions(pings)
+            await target.send(
+                greeting,
                 allowed_mentions=discord.AllowedMentions(
-                    roles=[discord.Object(id=i) for i in role_ids] if role_ids else False,
-                    users=[discord.Object(id=int(row["member_id"]))],
+                    roles=[discord.Object(id=i) for i in ping_roles] or False,
+                    users=[
+                        discord.Object(id=i)
+                        for i in {int(row["member_id"]), *ping_users}
+                    ],
                 ),
             )
 
@@ -479,7 +554,7 @@ class CTC(commands.Cog, name="ctc"):
                 "Run this inside a badge request thread — it amends that request.", ephemeral=True
             )
             return
-        if not self.is_instructor(interaction.user):
+        if not self.can_work(interaction.user, row["badge_key"]):
             await interaction.response.send_message(
                 "Only Training Instructors can amend a request.", ephemeral=True
             )
@@ -670,7 +745,7 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         own_cancel = action == "cancel" and row["member_id"] == str(interaction.user.id)
-        if not own_cancel and not self.is_instructor(interaction.user):
+        if not own_cancel and not self.can_work(interaction.user, row["badge_key"]):
             await interaction.response.send_message(
                 "Only Training Instructors can do that.", ephemeral=True
             )
@@ -682,6 +757,21 @@ class CTC(commands.Cog, name="ctc"):
         ):
             await interaction.response.send_message(
                 f"This is claimed by <@{row['instructor_id']}>. Ask them to release it first.",
+                ephemeral=True,
+            )
+            return
+
+        if action == "assign":
+            if not self.can_assign(interaction.user):
+                await interaction.response.send_message(
+                    "You cannot set who is working on a request.", ephemeral=True
+                )
+                return
+            view = AssignView(self, row)
+            await interaction.response.send_message(
+                f"**{self.catalogue.label(row['badge_key'], row['levels'])}** "
+                f"for <@{row['member_id']}>",
+                view=view,
                 ephemeral=True,
             )
             return
@@ -739,6 +829,53 @@ class CTC(commands.Cog, name="ctc"):
             await self.close_thread(updated)
         elif updated["status"] == "cancelled":
             await self.close_thread(updated)
+
+    async def assign_request(
+        self, interaction: discord.Interaction, row: Any, member: discord.abc.User
+    ) -> None:
+        """Put a named person on a request on someone else's behalf."""
+        if not self.can_assign(interaction.user):
+            await interaction.response.edit_message(
+                content="You cannot set who is working on a request.", view=None
+            )
+            return
+
+        previous = row["instructor_id"]
+        name = getattr(member, "display_name", str(member))
+        try:
+            updated = await self.database.assign(
+                int(row["id"]), instructor_id=str(member.id), instructor_name=name
+            )
+        except TransitionError as error:
+            await interaction.response.edit_message(
+                content=f"\N{WARNING SIGN} {error}", view=None
+            )
+            return
+
+        await interaction.response.edit_message(
+            content=f"Assigned to {member.mention}.", view=None
+        )
+        await self.refresh_ticket(updated)
+
+        # Say who did it, so a reassignment is not mistaken for the trainer
+        # having claimed it themselves.
+        if previous and previous != str(member.id):
+            note = (
+                f"<@{interaction.user.id}> reassigned this from <@{previous}> "
+                f"to {member.mention}."
+            )
+        else:
+            note = f"<@{interaction.user.id}> assigned this to {member.mention}."
+        await self.post_to_thread(updated, note)
+
+        # A private thread is invisible to someone who was never added to it,
+        # and being handed the work is exactly when that matters.
+        if updated["thread_id"]:
+            with contextlib.suppress(discord.HTTPException):
+                thread = self.bot.get_channel(
+                    int(updated["thread_id"])
+                ) or await self.bot.fetch_channel(int(updated["thread_id"]))
+                await thread.add_user(discord.Object(id=int(member.id)))
 
     async def record_result(self, interaction: discord.Interaction, view: ResultView) -> None:
         try:

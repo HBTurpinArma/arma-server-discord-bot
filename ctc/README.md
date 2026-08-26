@@ -32,6 +32,7 @@ Add to `config.json` under `discord`:
   "queue_channel_id": 1111111111111111111,
   "instructor_role_id": 1111111111111111111,
   "config_role_id": 0,
+  "assign_role_id": 0,
   "panel_role_id": 0,
   "taw_award_url": "https://www.taw.net/",
   "create_threads": true,
@@ -58,6 +59,7 @@ ability:
 | `queue_channel_id` | — | Where request threads are created. Required. |
 | `instructor_role_id` | `0` | Claim/complete/award, and the queue and stats commands. **`0` means anyone**, for local testing only. |
 | `config_role_id` | `0` | Who may edit the catalogue. `0` falls back to the Manage Server permission. |
+| `assign_role_id` | `0` | Who may set who is working on a request. `0` falls back to the instructor roles. |
 | `panel_role_id` | `0` | Who may post the request panel. `0` falls back to the Manage Server permission. |
 | `taw_award_url` | `""` | Deep link on completed tickets. Omitted if blank. |
 | `create_threads` | `true` | `false` posts cards in the channel instead. |
@@ -106,7 +108,7 @@ Send Messages in Threads to keep the channel a clean list.
 | `/badge catalogue` | Everyone | Every badge, its levels and availability |
 | `/badge queue [mine] [open]` | Instructors | Open request threads |
 | `/badge stats` | Instructors | Status counts, load, turnaround |
-| `/badge amend` | Instructors | Change what this thread's request needs |
+| `/badge amend` | Instructors + extra trainers | Change what this thread's request needs |
 | `/badge config` | Config role | Add, edit or retire badges |
 | `/badge panel [catalogue]` | Manage Server | Post the pinnable request button |
 
@@ -158,6 +160,24 @@ because each is claimed by a different instructor and finishes on a different
 day. But the levels *within* one badge stay on a single ticket: Grenadier Basic
 + Advanced + Expert is one test session with one instructor.
 
+## Setting who is working on a request
+
+**Assign…** on an unclaimed ticket, **Reassign…** on a claimed one, opens a
+picker and puts that person's name on it. Assigning unclaimed work claims it in
+the same move, so there is no need to claim first and hand over second.
+
+By default anyone who can claim can also assign. Set `assign_role_id` to narrow
+it — to Training Specialists, say — and it then excludes everyone else,
+instructors included.
+
+The thread records who did it (`X assigned this to Y`, or `X reassigned this
+from Y to Z`), so a reassignment is not mistaken for the trainer having picked
+it up themselves. The person assigned is added to the thread, which matters on
+a private thread they were never part of.
+
+Awarded and cancelled requests cannot be assigned — there is nothing left to
+work on. Reopen first.
+
 ## Editing the catalogue
 
 `ctc/catalogue.json` is the source of truth — the picker, level dropdowns, queue
@@ -169,12 +189,52 @@ something unloadable. Rejected: unknown level or category, duplicate key, a Tab
 marked timed, a `wipLevels` entry the badge does not have, and more than 25
 requestable badges (Discord's select menu limit).
 
+Each badge's editor covers category, levels, levels held back, rename,
+variants, extra trainers, timed, and availability.
+
 Renaming keeps the old name in `formerNames` so historic rows still resolve.
 Deleting warns how many requests reference the badge and offers "mark in
 development" instead, which hides it from the picker without breaking history.
 
 Editing the file by hand also works and is better for bulk changes; restart
 afterwards.
+
+### Extra trainers
+
+Not every badge can be run by every instructor. `extraTrainers` names people or
+roles pinged for one badge on top of the usual instructor roles:
+
+```json
+{ "key": "rotary", "extraTrainers": ["<@189362064995778560>"] }
+```
+
+Entries are literal Discord mentions — `<@id>` for a person, `<@&id>` for a
+role — so one field covers both. Anything that is not a mention is rejected at
+load, as is a list longer than 25.
+
+Set it from **`/badge config` → pick a badge → Trainers**. The picker takes
+people and roles in the same menu, and whoever is already set comes back
+pre-selected. Picking replaces the whole list; choosing nothing, or the
+**Clear** button, empties it. The badge editor shows the current list and the
+count on the button, so it is visible without opening the screen.
+
+Hand-editing `catalogue.json` works too, and is better for setting several
+badges at once.
+
+Currently set on Fixed Wing and Rotary.
+
+**Extra trainers can work the tickets for their own badges** — claim, complete,
+record a result, award, reopen, and `/badge amend` — exactly as an instructor
+would. That is scoped to the badges that name them: being the Rotary specialist
+grants nothing on a Medical ticket.
+
+They are also added to the request thread when it is created, because on a
+private thread permission to claim is no use without being able to see it. This
+only works for named *people*: Discord cannot add a role to a thread, so a
+role-based extra trainer still needs **Manage Threads** on the queue channel.
+
+`/badge queue` and `/badge stats` remain instructor-only. They are guild-wide
+views rather than per-badge, so an extra trainer works from the thread itself.
 
 Panels posted by `/badge panel` are tracked in `ctc_panels`, and any that embed
 the catalogue are re-rendered whenever `/badge config` changes it, so a pinned
@@ -194,7 +254,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-32 offline checks — catalogue validation, all three badge kinds, variants, the
+55 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 
