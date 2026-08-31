@@ -14,6 +14,7 @@ The cog owns its own SQLite file and registers its own persistent components in
 from __future__ import annotations
 
 import contextlib
+import datetime
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -58,9 +59,35 @@ DEFAULTS: dict[str, Any] = {
     "archive_on_award": True,
     "lock_on_award": False,
     "assign_role_id": 0,
+    "daily_bump": True,
     "nudge_unclaimed_hours": 48,
     "nudge_unawarded_hours": 72,
 }
+
+
+#: Prefix marking a finished request's thread, so the channel can be read at a
+#: glance without opening anything.
+CLOSED_PREFIX = "CLOSED: "
+
+#: Discord's hard limit on a thread name.
+MAX_THREAD_NAME = 100
+
+
+def closed_name(name: str) -> str:
+    """``name`` with the closed prefix, trimmed to fit and never doubled."""
+    if name.startswith(CLOSED_PREFIX):
+        return name
+    return (CLOSED_PREFIX + name)[:MAX_THREAD_NAME]
+
+
+def open_name(name: str) -> str:
+    """``name`` without the closed prefix.
+
+    The original may have been truncated to make room for the prefix, so this
+    does not always restore the exact name it started as — it only guarantees
+    the thread no longer reads as closed.
+    """
+    return name[len(CLOSED_PREFIX):] if name.startswith(CLOSED_PREFIX) else name
 
 
 def split_mentions(mentions: Sequence[str]) -> tuple[list[int], list[int]]:
@@ -122,6 +149,7 @@ class CTC(commands.Cog, name="ctc"):
         # The pinned panel has a fixed id, so it is a plain persistent view.
         self.bot.add_view(PanelView())
         self.nudge_loop.start()
+        self.bump_loop.start()
         self.bot.logger.info(
             f"CTC: {len(self._catalogue.all())} badges loaded, "
             f"{len(self._catalogue.requestable())} requestable"
@@ -129,6 +157,7 @@ class CTC(commands.Cog, name="ctc"):
 
     async def cog_unload(self) -> None:
         self.nudge_loop.cancel()
+        self.bump_loop.cancel()
         # Unregister so a cog reload does not double-register the handler.
         self.bot.remove_dynamic_items(TicketButton)
         if self.database is not None:
@@ -374,19 +403,46 @@ class CTC(commands.Cog, name="ctc"):
             self.bot.logger.warning(f"CTC: could not post to thread for #{row['id']}: {error}")
 
     async def close_thread(self, row: Any) -> None:
-        """Archive a finished request's thread so the channel lists live work only."""
-        if not row["thread_id"] or not self.settings["archive_on_award"]:
+        """Mark a finished request's thread closed, and archive it.
+
+        The rename happens whether or not archiving is on: the prefix is how a
+        finished request is told apart at a glance, and that is worth having
+        even when threads are left in the list.
+        """
+        if not row["thread_id"]:
             return
         try:
             thread = self.bot.get_channel(int(row["thread_id"])) or await self.bot.fetch_channel(
                 int(row["thread_id"])
             )
-            if self.settings["lock_on_award"]:
-                await thread.edit(locked=True, archived=True)
-            else:
-                await thread.edit(archived=True)
+            edits: dict[str, Any] = {}
+            name = closed_name(thread.name)
+            if name != thread.name:
+                edits["name"] = name
+            if self.settings["archive_on_award"]:
+                edits["archived"] = True
+                if self.settings["lock_on_award"]:
+                    edits["locked"] = True
+            if edits:
+                # One edit call: a name change on an already-archived thread
+                # would need it unarchived again first.
+                await thread.edit(**edits)
         except discord.HTTPException as error:
-            self.bot.logger.warning(f"CTC: could not archive thread for #{row['id']}: {error}")
+            self.bot.logger.warning(f"CTC: could not close thread for #{row['id']}: {error}")
+
+    async def reopen_thread(self, row: Any) -> None:
+        """Drop the CLOSED prefix when work starts again."""
+        if not row["thread_id"]:
+            return
+        try:
+            thread = self.bot.get_channel(int(row["thread_id"])) or await self.bot.fetch_channel(
+                int(row["thread_id"])
+            )
+            name = open_name(thread.name)
+            if name != thread.name:
+                await thread.edit(name=name, archived=False)
+        except discord.HTTPException as error:
+            self.bot.logger.warning(f"CTC: could not reopen thread for #{row['id']}: {error}")
 
     # ------------------------------------------------------------ commands
 
@@ -954,6 +1010,7 @@ class CTC(commands.Cog, name="ctc"):
             content=f"Reopened — request #{view.request_id} is back with you to run again.",
             view=None,
         )
+        await self.reopen_thread(updated)
         await self.refresh_ticket(updated)
         await self.post_to_thread(
             updated,
@@ -961,6 +1018,41 @@ class CTC(commands.Cog, name="ctc"):
         )
 
     # ------------------------------------------------------------- nudges
+
+    @tasks.loop(time=datetime.time(hour=0, minute=0, tzinfo=datetime.timezone.utc))
+    async def bump_loop(self) -> None:
+        """Keep open request threads from auto-archiving.
+
+        Discord archives a thread after its inactivity window, and a request
+        waiting on a member's availability can easily go quiet for longer than
+        that. Any message resets the timer, so a daily line is enough.
+
+        Deliberately silent: no mentions, so it keeps threads alive without
+        notifying anybody.
+        """
+        if self.database is None or not self.settings["daily_bump"]:
+            return
+        for row in await self.database.queue():
+            if not row["thread_id"]:
+                continue
+            try:
+                thread = self.bot.get_channel(
+                    int(row["thread_id"])
+                ) or await self.bot.fetch_channel(int(row["thread_id"]))
+                # An archived thread is either finished or already lost; posting
+                # would silently unarchive it, so leave it be.
+                if getattr(thread, "archived", False):
+                    continue
+                await thread.send(
+                    "Bump to keep alive",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException as error:
+                self.bot.logger.warning(f"CTC: could not bump #{row['id']}: {error}")
+
+    @bump_loop.before_loop
+    async def before_bump_loop(self) -> None:
+        await self.bot.wait_until_ready()
 
     @tasks.loop(hours=1)
     async def nudge_loop(self) -> None:

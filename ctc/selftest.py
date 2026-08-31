@@ -1167,6 +1167,64 @@ def _() -> None:
     assert not pattern.fullmatch(PANEL_CUSTOM_ID)
 
 
+
+@check("a closed thread is prefixed, once, and still fits Discord's name limit")
+def _() -> None:
+    from cogs.ctc import CLOSED_PREFIX, MAX_THREAD_NAME, closed_name, open_name
+
+    assert closed_name("Almerra — Rotary B") == "CLOSED: Almerra — Rotary B"
+
+    # Closing twice must not stack prefixes -- reopen/close cycles are normal.
+    once = closed_name("Almerra — Rotary B")
+    assert closed_name(once) == once
+
+    # A name already at the limit still fits once prefixed.
+    long_name = "x" * MAX_THREAD_NAME
+    assert len(closed_name(long_name)) == MAX_THREAD_NAME
+    assert closed_name(long_name).startswith(CLOSED_PREFIX)
+
+    # Reopening takes it back off, and leaves an unprefixed name alone.
+    assert open_name("CLOSED: Almerra — Rotary B") == "Almerra — Rotary B"
+    assert open_name("Almerra — Rotary B") == "Almerra — Rotary B"
+    assert open_name(closed_name("Almerra — CQC")) == "Almerra — CQC"
+
+
+@check("closing renames even when archiving is off, and reopening undoes it")
+def _() -> None:
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    close = src[src.index("async def close_thread"):src.index("async def reopen_thread")]
+    # The early return must only be about a missing thread; gating the whole
+    # method on archive_on_award would skip the rename too.
+    assert 'if not row["thread_id"]:' in close
+    assert "archive_on_award" in close, "archiving is still conditional"
+    assert close.index('if not row["thread_id"]:') < close.index("archive_on_award")
+    # One edit call -- renaming an archived thread needs it unarchived first.
+    assert close.count("await thread.edit(") == 1, "name and archive must be one edit"
+    # Reopening a request has to clear the prefix or the title lies.
+    assert "await self.reopen_thread(updated)" in src
+
+
+@check("the daily bump is silent, skips archived threads, and can be switched off")
+def _() -> None:
+    from cogs.ctc import DEFAULTS
+
+    assert DEFAULTS["daily_bump"] is True
+
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    bump = src[src.index("async def bump_loop"):src.index("@bump_loop.before_loop")]
+    assert '"Bump to keep alive"' in bump
+    # No pings: the point is to keep threads alive, not to notify anyone.
+    assert "AllowedMentions.none()" in bump
+    # Posting into an archived thread would silently unarchive it.
+    assert 'getattr(thread, "archived", False)' in bump
+    assert 'self.settings["daily_bump"]' in bump
+    # Runs once a day at a fixed time, not on an interval.
+    assert "tasks.loop(time=datetime.time(hour=0, minute=0" in src
+    # Started and stopped with the cog, like the nudge loop.
+    assert "self.bump_loop.start()" in src
+    assert "self.bump_loop.cancel()" in src
+
+
 def main() -> int:
     passed = 0
     total = 0

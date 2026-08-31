@@ -38,6 +38,7 @@ Add to `config.json` under `discord`:
   "create_threads": true,
   "hide_thread_notices": true,
   "archive_on_award": true,
+  "daily_bump": true,
   "lock_on_award": false,
   "nudge_unclaimed_hours": 48,
   "nudge_unawarded_hours": 72
@@ -66,6 +67,7 @@ ability:
 | `private_threads` | `false` | `true` makes each request a private thread. See below. |
 | `hide_thread_notices` | `true` | Deletes Discord's "started a thread" message. Needs Manage Messages. |
 | `archive_on_award` | `true` | Archives the thread once awarded or cancelled. |
+| `daily_bump` | `true` | Posts a silent daily line in open threads so they do not auto-archive. |
 | `lock_on_award` | `false` | Also locks it, so only moderators can reopen. |
 
 A Forum channel is detected automatically — each request becomes a forum post
@@ -159,6 +161,23 @@ Three badges in one submission creates **three** tickets sharing a `group_id`,
 because each is claimed by a different instructor and finishes on a different
 day. But the levels *within* one badge stay on a single ticket: Grenadier Basic
 + Advanced + Expert is one test session with one instructor.
+
+## Closed threads and keeping open ones alive
+
+A finished request's thread is renamed with a **`CLOSED: `** prefix, so the
+channel can be read at a glance without opening anything. The rename happens
+whether or not `archive_on_award` is on, and reopening a request takes the
+prefix back off.
+
+Names are capped at Discord's 100 characters, so a very long one loses its tail
+to make room. Closing twice does not stack the prefix.
+
+Open threads get a silent **"Bump to keep alive"** once a day at **00:00 UTC**.
+Discord auto-archives an inactive thread, and a request waiting on someone's
+availability can easily go quiet for longer than that; any message resets the
+timer. The bump carries no mentions, so it keeps threads alive without
+notifying anyone, and it skips threads that are already archived — posting into
+one would silently unarchive it. Set `daily_bump` to `false` to turn it off.
 
 ## Setting who is working on a request
 
@@ -254,7 +273,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-55 offline checks — catalogue validation, all three badge kinds, variants, the
+58 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 
