@@ -65,6 +65,24 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+#: Columns added after the table first shipped. ``CREATE TABLE IF NOT EXISTS``
+#: leaves an existing table exactly as it is, so the schema file alone only
+#: helps a fresh database — a live one needs these adding by hand.
+LATER_COLUMNS: dict[str, dict[str, str]] = {
+    "ctc_requests": {"bump_message_id": "TEXT"},
+}
+
+
+async def ensure_columns(db: aiosqlite.Connection) -> None:
+    """Add any missing later columns. Safe to run on every startup."""
+    for table, columns in LATER_COLUMNS.items():
+        cursor = await db.execute(f"PRAGMA table_info({table})")
+        present = {row[1] for row in await cursor.fetchall()}
+        for name, declaration in columns.items():
+            if name not in present:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+
+
 #: Prefix marking a finished request's thread, so the channel can be read at a
 #: glance without opening anything.
 CLOSED_PREFIX = "CLOSED: "
@@ -136,6 +154,7 @@ class CTC(commands.Cog, name="ctc"):
         async with aiosqlite.connect(DATABASE_PATH) as db:
             with open(SCHEMA_PATH) as handle:
                 await db.executescript(handle.read())
+            await ensure_columns(db)
             await db.commit()
 
         self.database = CTCDatabaseManager(
@@ -415,6 +434,11 @@ class CTC(commands.Cog, name="ctc"):
             thread = self.bot.get_channel(int(row["thread_id"])) or await self.bot.fetch_channel(
                 int(row["thread_id"])
             )
+            # Drop the keep-alive before archiving — a finished thread has no
+            # use for one, and it cannot be deleted once the thread is closed.
+            await self.clear_bump(thread, row["bump_message_id"])
+            await self.database.set_bump_message(int(row["id"]), None)
+
             edits: dict[str, Any] = {}
             name = closed_name(thread.name)
             if name != thread.name:
@@ -1029,6 +1053,12 @@ class CTC(commands.Cog, name="ctc"):
 
         Deliberately silent: no mentions, so it keeps threads alive without
         notifying anybody.
+
+        Yesterday's bump is deleted only *after* today's has landed, so a
+        thread is never briefly without one and the inactivity clock is reset
+        by a message that genuinely exists. Posting and immediately deleting
+        would leave no clutter either, but whether that still resets the clock
+        is Discord's business and not something worth betting the queue on.
         """
         if self.database is None or not self.settings["daily_bump"]:
             return
@@ -1043,12 +1073,27 @@ class CTC(commands.Cog, name="ctc"):
                 # would silently unarchive it, so leave it be.
                 if getattr(thread, "archived", False):
                     continue
-                await thread.send(
+                message = await thread.send(
                     "Bump to keep alive",
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             except discord.HTTPException as error:
                 self.bot.logger.warning(f"CTC: could not bump #{row['id']}: {error}")
+                continue
+
+            await self.clear_bump(thread, row["bump_message_id"])
+            await self.database.set_bump_message(int(row["id"]), str(message.id))
+
+    async def clear_bump(self, thread: Any, message_id: str | None) -> None:
+        """Delete a previous keep-alive message, if it is still there.
+
+        Best effort: someone may have tidied it away by hand, and a bump that
+        cannot be deleted is untidy rather than broken.
+        """
+        if not message_id:
+            return
+        with contextlib.suppress(discord.HTTPException):
+            await (await thread.fetch_message(int(message_id))).delete()
 
     @bump_loop.before_loop
     async def before_bump_loop(self) -> None:

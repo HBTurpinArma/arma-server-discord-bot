@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS `ctc_requests` (
   `awarded_at`       TEXT,
   `cancelled_at`     TEXT,
   `last_nudged_at`   TEXT,
+  `bump_message_id`  TEXT,
   `amended_at`       TEXT,
   `amended_by`       TEXT,
   `amended_by_name`  TEXT

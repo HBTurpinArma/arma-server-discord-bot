@@ -173,11 +173,23 @@ Names are capped at Discord's 100 characters, so a very long one loses its tail
 to make room. Closing twice does not stack the prefix.
 
 Open threads get a silent **"Bump to keep alive"** once a day at **00:00 UTC**.
+Each day's bump replaces the previous one, so a thread carries exactly one
+keep-alive line however long it stays open, and closing a request removes it.
 Discord auto-archives an inactive thread, and a request waiting on someone's
 availability can easily go quiet for longer than that; any message resets the
 timer. The bump carries no mentions, so it keeps threads alive without
 notifying anyone, and it skips threads that are already archived — posting into
 one would silently unarchive it. Set `daily_bump` to `false` to turn it off.
+
+The old bump is deleted only after the new one has posted, so the thread is
+never briefly without a message holding the clock open. Posting and instantly
+deleting would leave no trace at all, but whether Discord still counts a
+deleted message as activity is undocumented, and a silent failure here means
+threads quietly archive.
+
+The message id is kept in `bump_message_id`. That column is added to existing
+databases on startup — `CREATE TABLE IF NOT EXISTS` leaves a live table alone,
+so the schema file only covers a fresh one.
 
 ## Setting who is working on a request
 
@@ -273,7 +285,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-58 offline checks — catalogue validation, all three badge kinds, variants, the
+60 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 

@@ -1211,7 +1211,7 @@ def _() -> None:
     assert DEFAULTS["daily_bump"] is True
 
     src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
-    bump = src[src.index("async def bump_loop"):src.index("@bump_loop.before_loop")]
+    bump = src[src.index("async def bump_loop"):src.index("async def clear_bump")]
     assert '"Bump to keep alive"' in bump
     # No pings: the point is to keep threads alive, not to notify anyone.
     assert "AllowedMentions.none()" in bump
@@ -1220,9 +1220,65 @@ def _() -> None:
     assert 'self.settings["daily_bump"]' in bump
     # Runs once a day at a fixed time, not on an interval.
     assert "tasks.loop(time=datetime.time(hour=0, minute=0" in src
-    # Started and stopped with the cog, like the nudge loop.
     assert "self.bump_loop.start()" in src
     assert "self.bump_loop.cancel()" in src
+
+
+@check("each bump replaces the last rather than piling up")
+def _() -> None:
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    bump = src[src.index("async def bump_loop"):src.index("async def clear_bump")]
+
+    # Order matters: the new bump must land before the old one is removed, so
+    # the thread is never left without a message holding the clock open.
+    post = bump.index("await thread.send(")
+    clear = bump.index("await self.clear_bump(")
+    record = bump.index("set_bump_message(")
+    assert post < clear < record, "post, then clear, then record"
+
+    # A failed post must not delete yesterday's — that would strand the thread.
+    assert "continue" in bump[bump.index("except discord.HTTPException"):]
+
+    # Closing tidies the last one away, before the thread is archived.
+    close = src[src.index("async def close_thread"):src.index("async def reopen_thread")]
+    assert "await self.clear_bump(" in close
+    assert close.index("clear_bump") < close.index("await thread.edit(")
+
+
+@check("the bump column is added to databases that predate it")
+def _() -> None:
+    import asyncio as _asyncio
+
+    from cogs.ctc import LATER_COLUMNS, ensure_columns
+
+    assert "bump_message_id" in LATER_COLUMNS["ctc_requests"]
+    # It must also be in the schema, or a fresh database would rely on the
+    # migration and the two would drift.
+    assert "bump_message_id" in (ROOT / "schema.sql").read_text(encoding="utf-8")
+
+    async def run() -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "old.db"
+            async with aiosqlite.connect(path) as db:
+                # A table as it existed before the column was introduced.
+                await db.execute(
+                    "CREATE TABLE ctc_requests (id INTEGER PRIMARY KEY, status TEXT)"
+                )
+                await db.execute("INSERT INTO ctc_requests (status) VALUES ('requested')")
+                await db.commit()
+
+                await ensure_columns(db)
+                await db.commit()
+                cursor = await db.execute("PRAGMA table_info(ctc_requests)")
+                assert "bump_message_id" in {r[1] for r in await cursor.fetchall()}
+
+                # Running again must not raise -- it happens on every startup.
+                await ensure_columns(db)
+                await db.commit()
+                cursor = await db.execute("SELECT COUNT(*) FROM ctc_requests")
+                assert (await cursor.fetchone())[0] == 1, "existing rows survive"
+
+    _asyncio.run(run())
 
 
 def main() -> int:

@@ -358,6 +358,14 @@ class CTCDatabaseManager:
         )
         await self.connection.commit()
 
+    async def set_bump_message(self, request_id: int, message_id: str | None) -> None:
+        """Remember the keep-alive message, so the next one can replace it."""
+        await self.connection.execute(
+            "UPDATE ctc_requests SET bump_message_id = ? WHERE id = ?",
+            (message_id, request_id),
+        )
+        await self.connection.commit()
+
     async def mark_nudged(self, request_id: int) -> None:
         await self.connection.execute(
             "UPDATE ctc_requests SET last_nudged_at = datetime('now') WHERE id = ?", (request_id,)
