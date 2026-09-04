@@ -364,6 +364,40 @@ class _AssignSelect(discord.ui.UserSelect):
         )
 
 
+
+class UnitPickerView(discord.ui.View):
+    """Which battalion? Shown only when nothing else could work it out.
+
+    Ephemeral and one-shot, so it needs no persistent custom_id. Better than an
+    error: the member is one click from the thing they asked for, instead of
+    having to rerun the command with an option they did not know existed.
+    """
+
+    def __init__(self, cog: Any, member: discord.abc.User, on_pick: Any) -> None:
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.member = member
+        self.on_pick = on_pick
+        for unit in cog.units:
+            self.add_item(_UnitButton(self, unit))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.member.id
+
+    def content(self) -> str:
+        return "Which battalion is this for?"
+
+
+class _UnitButton(discord.ui.Button):
+    def __init__(self, parent: UnitPickerView, unit: Any) -> None:
+        super().__init__(label=unit.name, style=discord.ButtonStyle.primary)
+        self.parent_view = parent
+        self.unit = unit
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.on_pick(interaction, self.unit)
+
+
 # --------------------------------------------------------- request flow
 
 

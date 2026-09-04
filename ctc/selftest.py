@@ -1532,6 +1532,58 @@ def _() -> None:
     assert "self.can_request(unit, interaction.user)" in request
 
 
+
+@check("every command takes a unit option, and it is autocompleted")
+def _() -> None:
+    from cogs.ctc import CTC
+
+    for command in CTC.badge.walk_commands():
+        names = [p.name for p in command.parameters]
+        if command.name == "amend":
+            # Thread-scoped: the request in the thread already names its unit.
+            assert "unit" not in names, "amend needs no unit option"
+            continue
+        assert "unit" in names, f"/badge {command.name} is missing the unit option"
+        assert not command.parameters[names.index("unit")].required, (
+            f"/badge {command.name}: unit must stay optional"
+        )
+
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    # Choices come from the live config, so adding a battalion is config-only.
+    assert "async def unit_autocomplete(" in src
+    assert "for unit in cog.units" in src
+    assert src.count("@app_commands.autocomplete(unit=unit_autocomplete)") == 6
+
+
+@check("an unresolvable request asks which battalion instead of refusing")
+def _() -> None:
+    from ctc.views import UnitPickerView
+
+    cog = FakeCog(CAT)
+    cog.units = FakeUnits(
+        FakeUnit(CAT, "am2", "2nd Battalion"),
+        FakeUnit(CAT, "am1", "1st Battalion"),
+    )
+    view = UnitPickerView(cog, FakeUser(), None)
+    assert_component_limits(view, "unit picker")
+    assert labels(view) == ["2nd Battalion", "1st Battalion"], labels(view)
+
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    request = src[src.index("async def badge_request") : src.index("async def open_badge_picker")]
+    assert "UnitPickerView(" in request, "an unresolved request must offer the picker"
+    # And a named-but-wrong unit is an error, not a silent fall through to one.
+    assert "return  # resolve_unit already said the name was wrong" in request
+
+
+@check("an explicit unit beats everything else")
+def _() -> None:
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    resolve = src[src.index("async def resolve_unit") : src.index("async def queue_channel")]
+    # The explicit choice is checked before channel, thread or roles.
+    assert resolve.index("if chosen:") < resolve.index("channel = interaction.channel")
+    assert resolve.index("if chosen:") < resolve.index("for_member")
+
+
 def main() -> int:
     passed = 0
     total = 0

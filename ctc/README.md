@@ -170,6 +170,20 @@ to route asks the member a question; misrouting is invisible.
 Panels resolve without any of that: the button carries its unit in its
 custom_id, so a panel can only ever open its own battalion's badges.
 
+### Picking a battalion by hand
+
+Every command except `/badge amend` takes an optional `unit` option, offered by
+autocomplete from the live config — adding a battalion needs no code change.
+An explicit choice beats channel, thread and roles.
+
+`/badge amend` has none: it runs inside a request thread, and the request
+already names its battalion.
+
+When nothing can work it out — a member with no staff roles, running the
+command somewhere neutral — they get a **"Which battalion?"** button instead of
+an error, and are one click from the badge picker. That is the normal path for
+a plain member who does not use the panel.
+
 ### Who may request
 
 Set `member_role_id` (one id or a list) and only holders may raise a request
@@ -377,7 +391,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-69 offline checks — catalogue validation, all three badge kinds, variants, the
+72 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 
