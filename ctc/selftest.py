@@ -1430,6 +1430,54 @@ def _() -> None:
     assert "idx_ctc_requests_unit" in (ROOT / "schema.sql").read_text(encoding="utf-8")
 
 
+
+@check("editing one battalion's catalogue leaves the other alone")
+def _() -> None:
+    # The whole point of separate files: /badge config in one battalion must
+    # not touch the other's badges.
+    with tempfile.TemporaryDirectory() as tmp:
+        one = Path(tmp) / "one.json"
+        two = Path(tmp) / "two.json"
+        shutil.copy(catalogue_module.CATALOGUE_PATH, one)
+        shutil.copy(catalogue_module.CATALOGUE_PATH, two)
+        untouched = two.read_text(encoding="utf-8")
+
+        def rename(doc):
+            next(b for b in doc["badges"] if b["key"] == "medical")["name"] = "Field Medicine"
+
+        edited = catalogue_module.mutate(rename, one)
+        assert edited.get("medical").name == "Field Medicine"
+        assert two.read_text(encoding="utf-8") == untouched, "the other file must not move"
+        assert catalogue_module.load(two).get("medical").name == "Medical"
+
+
+@check("the shipped AM1 catalogue loads alongside AM2")
+def _() -> None:
+    am1 = ROOT / "am1.json"
+    if not am1.exists():
+        return  # only shipped once a second battalion is set up
+
+    units = Units(
+        {
+            "primary_unit": "am2",
+            "units": {
+                "am2": {"catalogue": "catalogue.json"},
+                "am1": {"catalogue": "am1.json"},
+            },
+        },
+        DEFAULTS,
+    )
+    a2 = units.require("am2").catalogue
+    a1 = units.require("am1").catalogue
+    assert a1 is not a2
+    assert len(a1.all()) and len(a2.all())
+    # Extra trainers name specific people, so a copied catalogue must not
+    # inherit the other battalion's staff.
+    assert not any(a1.extra_trainers(b.key) for b in a1.all()), (
+        "AM1 must not start with AM2's named trainers"
+    )
+
+
 def main() -> int:
     passed = 0
     total = 0

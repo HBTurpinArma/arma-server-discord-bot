@@ -143,7 +143,9 @@ both, while channels and roles stay per unit.
 
 `catalogue` is a filename beside the code in `ctc/`. Each unit needs its own,
 and `/badge config` only ever edits the one belonging to the unit the session
-started in.
+started in. `ctc/am1.json` ships as a copy of 2nd Battalion's, minus the
+`extraTrainers` entries — those name specific people, and each battalion has
+its own. The two files diverge from there.
 
 ### Which battalion is this?
 
@@ -358,7 +360,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-65 offline checks — catalogue validation, all three badge kinds, variants, the
+67 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 
