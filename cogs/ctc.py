@@ -879,16 +879,21 @@ class CTC(commands.Cog, name="ctc"):
         Raises on a bad edit, leaving the file as it was.
         """
         unit.catalogue = catalogue_module.mutate(fn, unit.catalogue_path)
-        # Any pinned panel now shows a stale catalogue. Refresh in the
-        # background so the edit itself stays responsive.
-        self.bot.loop.create_task(self.refresh_panels())
+        # This battalion's pinned panels now show a stale catalogue. Refresh
+        # in the background so the edit itself stays responsive, and only this
+        # unit's — the other battalion's badges did not change.
+        self.bot.loop.create_task(self.refresh_panels(unit=unit.key))
         return unit.catalogue
 
-    async def refresh_panels(self) -> None:
-        """Re-render the catalogue in every panel that embeds one."""
+    async def refresh_panels(self, *, unit: str | None = None) -> None:
+        """Re-render the catalogue in panels that embed one.
+
+        Scoped to a battalion when given, so editing one unit's badges does not
+        rewrite the other unit's pinned messages for nothing.
+        """
         if self.database is None:
             return
-        for row in await self.database.panels(with_catalogue_only=True):
+        for row in await self.database.panels(with_catalogue_only=True, unit=unit):
             try:
                 channel = self.bot.get_channel(
                     int(row["channel_id"])

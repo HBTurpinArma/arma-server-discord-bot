@@ -1584,6 +1584,18 @@ def _() -> None:
     assert resolve.index("if chosen:") < resolve.index("for_member")
 
 
+
+@check("a catalogue edit refreshes only that battalion's panels")
+def _() -> None:
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    apply = src[src.index("def apply_catalogue_edit") : src.index("async def refresh_panels")]
+    assert "refresh_panels(unit=unit.key)" in apply, (
+        "editing one unit must not rewrite the other's pinned messages"
+    )
+    refresh = src[src.index("async def refresh_panels") : src.index("@badge.command(name=\"panel\"")]
+    assert "panels(with_catalogue_only=True, unit=unit)" in refresh
+
+
 def main() -> int:
     passed = 0
     total = 0
