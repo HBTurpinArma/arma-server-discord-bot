@@ -27,12 +27,13 @@ from discord.ext import commands, tasks
 from ctc import CTCDatabaseManager, TransitionError
 from ctc import catalogue as catalogue_module
 from ctc.config_views import ConfigRootView
+from ctc.units import Unit, Units
 from ctc.views import (
     AmendView,
     AssignView,
     BadgePickerView,
     LevelView,
-    PanelView,
+    PanelButton,
     ResultView,
     TicketButton,
     catalogue_embed,
@@ -69,18 +70,35 @@ DEFAULTS: dict[str, Any] = {
 #: leaves an existing table exactly as it is, so the schema file alone only
 #: helps a fresh database — a live one needs these adding by hand.
 LATER_COLUMNS: dict[str, dict[str, str]] = {
-    "ctc_requests": {"bump_message_id": "TEXT"},
+    "ctc_requests": {
+        "bump_message_id": "TEXT",
+        "unit": "TEXT",
+    },
+    "ctc_panels": {"unit": "TEXT"},
 }
 
 
-async def ensure_columns(db: aiosqlite.Connection) -> None:
-    """Add any missing later columns. Safe to run on every startup."""
+async def ensure_columns(db: aiosqlite.Connection, primary_unit: str) -> None:
+    """Add any missing later columns and file old rows under a unit.
+
+    Safe to run on every startup. Rows written before battalions existed have
+    no unit, and they all belong to whichever one was already running, so they
+    are backfilled to the primary rather than left NULL — a NULL unit would
+    drop them out of every queue.
+    """
     for table, columns in LATER_COLUMNS.items():
         cursor = await db.execute(f"PRAGMA table_info({table})")
         present = {row[1] for row in await cursor.fetchall()}
+        if not present:
+            continue  # table not created yet; the schema file will make it
         for name, declaration in columns.items():
             if name not in present:
                 await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+        if "unit" in columns:
+            await db.execute(
+                f"UPDATE {table} SET unit = ? WHERE unit IS NULL OR unit = ''",
+                (primary_unit,),
+            )
 
 
 #: Prefix marking a finished request's thread, so the channel can be read at a
@@ -133,46 +151,65 @@ class CTC(commands.Cog, name="ctc"):
     def __init__(self, bot) -> None:
         self.bot = bot
         self.database: CTCDatabaseManager | None = None
-        self._catalogue = catalogue_module.load()
+        self.units = Units(self.raw_config(bot), DEFAULTS)
 
     # ------------------------------------------------------------- wiring
 
-    @property
-    def catalogue(self) -> catalogue_module.Catalogue:
-        return self._catalogue
-
-    @property
-    def settings(self) -> dict[str, Any]:
-        configured = (
-            self.bot.config.get("discord", {}).get("combat_training_centre", {})
-            if hasattr(self.bot, "config")
+    @staticmethod
+    def raw_config(bot) -> dict[str, Any]:
+        return (
+            bot.config.get("discord", {}).get("combat_training_centre", {})
+            if hasattr(bot, "config")
             else {}
         )
-        return {**DEFAULTS, **configured}
+
+    def unit_of(self, row: Any) -> Unit:
+        """The battalion a request belongs to.
+
+        Falls back to the primary rather than raising: a row whose unit was
+        removed from the config is still real work someone is waiting on, and
+        losing it would be worse than showing it in the wrong queue.
+        """
+        return self.units.get(row["unit"]) or self.units.require(self.units.primary)
+
+    def catalogue_of(self, row: Any) -> catalogue_module.Catalogue:
+        return self.unit_of(row).catalogue
+
+    def settings_of(self, row: Any) -> dict[str, Any]:
+        return self.unit_of(row).settings
 
     async def cog_load(self) -> None:
         async with aiosqlite.connect(DATABASE_PATH) as db:
+            # Columns first, then the schema. An existing table is left alone by
+            # CREATE TABLE IF NOT EXISTS, so an index over a newly added column
+            # would be created against a column that is not there yet. On a
+            # fresh database there is no table to alter and this is a no-op.
+            await ensure_columns(db, self.units.primary)
             with open(SCHEMA_PATH) as handle:
                 await db.executescript(handle.read())
-            await ensure_columns(db)
             await db.commit()
 
         self.database = CTCDatabaseManager(
             connection=await aiosqlite.connect(DATABASE_PATH),
-            catalogue=lambda: self._catalogue,
+            catalogue=lambda unit: (
+                self.units.get(unit) or self.units.require(self.units.primary)
+            ).catalogue,
         )
 
         # Ticket buttons carry their request id in the custom_id, so they keep
         # working after a restart without re-registering per-message views.
         self.bot.add_dynamic_items(TicketButton)
-        # The pinned panel has a fixed id, so it is a plain persistent view.
-        self.bot.add_view(PanelView())
+        # Panels carry their unit the same way, so one server can pin a
+        # separate panel per battalion without them opening each other's
+        # badges.
+        self.bot.add_dynamic_items(PanelButton)
         self.nudge_loop.start()
         self.bump_loop.start()
-        self.bot.logger.info(
-            f"CTC: {len(self._catalogue.all())} badges loaded, "
-            f"{len(self._catalogue.requestable())} requestable"
-        )
+        for unit in self.units:
+            self.bot.logger.info(
+                f"CTC[{unit.key}]: {len(unit.catalogue.all())} badges loaded, "
+                f"{len(unit.catalogue.requestable())} requestable"
+            )
 
     async def cog_unload(self) -> None:
         self.nudge_loop.cancel()
@@ -198,36 +235,42 @@ class CTC(commands.Cog, name="ctc"):
 
     # -------------------------------------------------------- permissions
 
-    def role_ids(self, setting: str) -> list[int]:
+    @staticmethod
+    def role_ids(unit: Unit, setting: str) -> list[int]:
         """Role ids for a setting, which may be a single id or a list of them."""
-        value = self.settings[setting]
+        value = unit.settings.get(setting)
         if not value:
             return []
         if isinstance(value, (list, tuple)):
             return [int(v) for v in value if v]
         return [int(value)]
 
-    def role_mention(self, setting: str, fallback: str) -> str:
+    def role_mention(self, unit: Unit, setting: str, fallback: str) -> str:
         """Every configured role for a setting, as a mention string."""
-        ids = self.role_ids(setting)
+        ids = self.role_ids(unit, setting)
         return " ".join(f"<@&{i}>" for i in ids) if ids else fallback
 
-    def holds_any(self, user: discord.abc.User, setting: str) -> bool:
-        ids = set(self.role_ids(setting))
-        return bool(ids) and isinstance(user, discord.Member) and any(r.id in ids for r in user.roles)
+    def holds_any(self, unit: Unit, user: discord.abc.User, setting: str) -> bool:
+        ids = set(self.role_ids(unit, setting))
+        return (
+            bool(ids)
+            and isinstance(user, discord.Member)
+            and any(r.id in ids for r in user.roles)
+        )
 
-    def is_instructor(self, user: discord.abc.User) -> bool:
-        if not self.role_ids("instructor_role_id"):
+    def is_instructor(self, unit: Unit, user: discord.abc.User) -> bool:
+        if not self.role_ids(unit, "instructor_role_id"):
             return True  # unset means "anyone", for local testing only
-        return self.holds_any(user, "instructor_role_id")
+        return self.holds_any(unit, user, "instructor_role_id")
 
-    def is_extra_trainer(self, user: discord.abc.User, badge_key: str | None) -> bool:
+    def is_extra_trainer(self, unit: Unit, user: discord.abc.User, badge_key: str | None) -> bool:
         """True if this badge names this user, or a role they hold.
 
         Scoped to one badge on purpose: being the Rotary specialist grants
-        nothing on a Medical ticket.
+        nothing on a Medical ticket — and nothing at all in another battalion,
+        since the lookup is against that unit's own catalogue.
         """
-        mentions = self.catalogue.extra_trainers(badge_key or "")
+        mentions = unit.catalogue.extra_trainers(badge_key or "")
         if not mentions:
             return False
         user_ids, extra_roles = split_mentions(mentions)
@@ -236,40 +279,86 @@ class CTC(commands.Cog, name="ctc"):
         held = {role.id for role in getattr(user, "roles", [])}
         return bool(held & set(extra_roles))
 
-    def can_work(self, user: discord.abc.User, badge_key: str | None) -> bool:
+    def can_work(self, unit: Unit, user: discord.abc.User, badge_key: str | None) -> bool:
         """Who may act on a ticket: instructors, plus the badge's own trainers."""
-        return self.is_instructor(user) or self.is_extra_trainer(user, badge_key)
+        return self.is_instructor(unit, user) or self.is_extra_trainer(unit, user, badge_key)
 
-    def can_assign(self, user: discord.abc.User) -> bool:
+    def can_work_row(self, user: discord.abc.User, row: Any) -> bool:
+        """As above, for a ticket that already knows its own battalion."""
+        return self.can_work(self.unit_of(row), user, row["badge_key"])
+
+    def can_assign(self, unit: Unit, user: discord.abc.User) -> bool:
         """Who may put someone else's name on a request.
 
         Falls back to the instructor roles rather than Manage Server, so the
         ability exists out of the box and narrowing it to, say, Training
         Specialists is a deliberate choice rather than the default.
         """
-        if self.role_ids("assign_role_id"):
-            return self.holds_any(user, "assign_role_id")
-        return self.is_instructor(user)
+        if self.role_ids(unit, "assign_role_id"):
+            return self.holds_any(unit, user, "assign_role_id")
+        return self.is_instructor(unit, user)
 
-    def has_role(self, user: discord.abc.User, setting: str) -> bool:
+    def has_role(self, unit: Unit, user: discord.abc.User, setting: str) -> bool:
         """True if any configured role is held.
 
         Falls back to the Manage Server permission when no role is set, so a
         partial config still leaves someone able to act.
         """
-        if self.role_ids(setting):
-            return self.holds_any(user, setting)
+        if self.role_ids(unit, setting):
+            return self.holds_any(unit, user, setting)
         perms = getattr(user, "guild_permissions", None)
         return bool(perms and perms.manage_guild)
 
-    def can_configure(self, interaction: discord.Interaction) -> bool:
-        return self.has_role(interaction.user, "config_role_id")
+    def can_configure(self, unit: Unit, user: discord.abc.User) -> bool:
+        return self.has_role(unit, user, "config_role_id")
 
-    def can_post_panel(self, interaction: discord.Interaction) -> bool:
-        return self.has_role(interaction.user, "panel_role_id")
+    def can_post_panel(self, unit: Unit, user: discord.abc.User) -> bool:
+        return self.has_role(unit, user, "panel_role_id")
 
-    async def queue_channel(self) -> discord.abc.GuildChannel | None:
-        channel_id = int(self.settings["queue_channel_id"] or 0)
+    # ------------------------------------------------------------- routing
+
+    async def resolve_unit(
+        self, interaction: discord.Interaction, *, quiet: bool = False
+    ) -> Unit | None:
+        """Which battalion this interaction is about.
+
+        In order: the request thread it was run in, the queue channel it was
+        run in, the only configured unit, then the member's own roles. A member
+        who staffs both battalions is genuinely ambiguous, so they are asked
+        rather than guessed at.
+        """
+        channel = interaction.channel
+        if self.database is not None and channel is not None:
+            row = await self.database.by_thread(str(channel.id))
+            if row is not None:
+                return self.unit_of(row)
+
+        parent_id = getattr(channel, "parent_id", None)
+        unit = self.units.for_channel(getattr(channel, "id", None)) or self.units.for_channel(
+            parent_id
+        )
+        if unit is not None:
+            return unit
+
+        if self.units.only is not None:
+            return self.units.only
+
+        unit = self.units.for_member(interaction.user)
+        if unit is not None:
+            return unit
+
+        if not quiet:
+            names = ", ".join(f"**{u.name}**" for u in self.units)
+            await interaction.response.send_message(
+                "I cannot tell which battalion this is for — you are not in exactly "
+                f"one of {names}. Run this in that battalion's badge channel, "
+                "or use its request panel.",
+                ephemeral=True,
+            )
+        return None
+
+    async def queue_channel(self, unit: Unit) -> discord.abc.GuildChannel | None:
+        channel_id = int(unit.settings.get("queue_channel_id") or 0)
         if not channel_id:
             return None
         return self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
@@ -277,27 +366,31 @@ class CTC(commands.Cog, name="ctc"):
     # ------------------------------------------------------------ posting
 
     async def post_to_queue(self, rows: Sequence[Any]) -> None:
-        channel = await self.queue_channel()
-        if channel is None:
-            self.bot.logger.error("CTC: queue_channel_id is not configured")
-            return
-
-        settings = self.settings
-        is_forum = isinstance(channel, discord.ForumChannel)
-        role_ids = self.role_ids("instructor_role_id")
-        base_pings = [f"<@&{i}>" for i in role_ids]
-
         for row in rows:
-            embed = ticket_embed(self.catalogue, row)
+            unit = self.unit_of(row)
+            settings = unit.settings
+            cat = unit.catalogue
+
+            channel = await self.queue_channel(unit)
+            if channel is None:
+                self.bot.logger.error(
+                    f"CTC[{unit.key}]: queue_channel_id is not configured"
+                )
+                continue
+
+            is_forum = isinstance(channel, discord.ForumChannel)
+            role_ids = self.role_ids(unit, "instructor_role_id")
+            base_pings = [f"<@&{i}>" for i in role_ids]
+            embed = ticket_embed(cat, row)
             view = ticket_view(
-                self.catalogue, row, award_url=settings["taw_award_url"] or None
+                cat, row, award_url=settings["taw_award_url"] or None
             )
             # Member first — the channel sorts into a readable list of who is
             # waiting on what. Levels abbreviated to keep the name scannable;
             # the card inside spells them out in full.
             title = (
                 f"{row['member_name']} — "
-                f"{self.catalogue.label(row['badge_key'], row['levels'], short=True)}"
+                f"{cat.label(row['badge_key'], row['levels'], short=True)}"
             )[:100]
 
             target: Any = channel
@@ -339,7 +432,7 @@ class CTC(commands.Cog, name="ctc"):
 
             # Some badges can only be run by particular people, so the pings
             # are assembled per badge rather than once for the whole batch.
-            extra = self.catalogue.extra_trainers(row["badge_key"])
+            extra = cat.extra_trainers(row["badge_key"])
             pings = base_pings + [m for m in extra if m not in base_pings]
 
             # Subscribe the requester so they follow their own ticket, and the
@@ -402,9 +495,11 @@ class CTC(commands.Cog, name="ctc"):
             )
             message = await channel.fetch_message(int(row["queue_message_id"]))
             await message.edit(
-                embed=ticket_embed(self.catalogue, row),
+                embed=ticket_embed(self.catalogue_of(row), row),
                 view=ticket_view(
-                    self.catalogue, row, award_url=self.settings["taw_award_url"] or None
+                    self.catalogue_of(row),
+                    row,
+                    award_url=self.settings_of(row)["taw_award_url"] or None,
                 ),
             )
         except discord.HTTPException as error:
@@ -443,9 +538,9 @@ class CTC(commands.Cog, name="ctc"):
             name = closed_name(thread.name)
             if name != thread.name:
                 edits["name"] = name
-            if self.settings["archive_on_award"]:
+            if self.settings_of(row)["archive_on_award"]:
                 edits["archived"] = True
-                if self.settings["lock_on_award"]:
+                if self.settings_of(row)["lock_on_award"]:
                     edits["locked"] = True
             if edits:
                 # One edit call: a name change on an already-archived thread
@@ -472,13 +567,19 @@ class CTC(commands.Cog, name="ctc"):
 
     @badge.command(name="request", description="Request one or more badges")
     async def badge_request(self, interaction: discord.Interaction) -> None:
-        view = BadgePickerView(self, interaction.user)
+        unit = await self.resolve_unit(interaction)
+        if unit is None:
+            return
+        view = BadgePickerView(self, interaction.user, unit)
         await interaction.response.send_message(view.content(), view=view, ephemeral=True)
 
     @badge.command(name="catalogue", description="List every badge and its levels")
     async def badge_catalogue(self, interaction: discord.Interaction) -> None:
+        unit = await self.resolve_unit(interaction)
+        if unit is None:
+            return
         await interaction.response.send_message(
-            embed=catalogue_embed(self.catalogue), ephemeral=True
+            embed=catalogue_embed(unit.catalogue), ephemeral=True
         )
 
     @badge.command(name="queue", description="Show open badge requests")
@@ -488,14 +589,17 @@ class CTC(commands.Cog, name="ctc"):
     async def badge_queue(
         self, interaction: discord.Interaction, mine: bool = False, open: bool = False
     ) -> None:
-        if not self.is_instructor(interaction.user):
+        unit = await self.resolve_unit(interaction)
+        if unit is None:
+            return
+        if not self.is_instructor(unit, interaction.user):
             await interaction.response.send_message(
                 "Only Training Instructors can view the queue.", ephemeral=True
             )
             return
 
         await interaction.response.defer(ephemeral=True)
-        channel = await self.queue_channel()
+        channel = await self.queue_channel(unit)
         if channel is None:
             await interaction.followup.send("Queue channel is not configured.", ephemeral=True)
             return
@@ -568,13 +672,16 @@ class CTC(commands.Cog, name="ctc"):
 
     @badge.command(name="stats", description="Pipeline stats and instructor load")
     async def badge_stats(self, interaction: discord.Interaction) -> None:
-        if not self.is_instructor(interaction.user):
+        unit = await self.resolve_unit(interaction)
+        if unit is None:
+            return
+        if not self.is_instructor(unit, interaction.user):
             await interaction.response.send_message(
                 "Only Training Instructors can view pipeline stats.", ephemeral=True
             )
             return
 
-        stats = await self.database.stats()
+        stats = await self.database.stats(unit=unit.key)
         embed = discord.Embed(colour=0x5865F2, title="Badge pipeline")
 
         by_status = stats["by_status"]
@@ -599,7 +706,7 @@ class CTC(commands.Cog, name="ctc"):
 
         if stats["turnaround"]:
             def badge_name(key: str) -> str:
-                badge = self.catalogue.get(key)
+                badge = unit.catalogue.get(key)
                 return badge.name if badge else key
 
             embed.add_field(
@@ -616,7 +723,8 @@ class CTC(commands.Cog, name="ctc"):
             embed.add_field(
                 name="Oldest open",
                 value=(
-                    f"#{oldest['id']} {self.catalogue.label(oldest['badge_key'], oldest['levels'])}"
+                    f"#{oldest['id']} "
+                    f"{unit.catalogue.label(oldest['badge_key'], oldest['levels'])}"
                     f" — {relative(oldest['created_at'])}"
                 ),
                 inline=False,
@@ -634,7 +742,7 @@ class CTC(commands.Cog, name="ctc"):
                 "Run this inside a badge request thread — it amends that request.", ephemeral=True
             )
             return
-        if not self.can_work(interaction.user, row["badge_key"]):
+        if not self.can_work_row(interaction.user, row):
             await interaction.response.send_message(
                 "Only Training Instructors can amend a request.", ephemeral=True
             )
@@ -645,7 +753,7 @@ class CTC(commands.Cog, name="ctc"):
             )
             return
 
-        badge = self.catalogue.get(row["badge_key"])
+        badge = self.catalogue_of(row).get(row["badge_key"])
         if (
             badge is not None
             and not badge.needs_level_choice
@@ -663,24 +771,30 @@ class CTC(commands.Cog, name="ctc"):
 
     @badge.command(name="config", description="Add, edit or retire badges")
     async def badge_config(self, interaction: discord.Interaction) -> None:
-        if not self.can_configure(interaction):
+        unit = await self.resolve_unit(interaction)
+        if unit is None:
+            return
+        if not self.can_configure(unit, interaction.user):
             await interaction.response.send_message(
                 "You do not have the role required to edit the catalogue."
-                if self.role_ids("config_role_id")
+                if self.role_ids(unit, "config_role_id")
                 else "You need Manage Server to edit the catalogue.",
                 ephemeral=True,
             )
             return
-        view = ConfigRootView(self, interaction.user)
+        view = ConfigRootView(self, interaction.user, unit=unit)
         await interaction.response.send_message(view.content(), view=view, ephemeral=True)
 
-    def apply_catalogue_edit(self, fn) -> catalogue_module.Catalogue:
-        """Validate, write and hot-reload the catalogue. Raises on a bad edit."""
-        self._catalogue = catalogue_module.mutate(fn)
+    def apply_catalogue_edit(self, unit: Unit, fn) -> catalogue_module.Catalogue:
+        """Validate, write and hot-reload one unit's catalogue.
+
+        Raises on a bad edit, leaving the file as it was.
+        """
+        unit.catalogue = catalogue_module.mutate(fn, unit.catalogue_path)
         # Any pinned panel now shows a stale catalogue. Refresh in the
         # background so the edit itself stays responsive.
         self.bot.loop.create_task(self.refresh_panels())
-        return self._catalogue
+        return unit.catalogue
 
     async def refresh_panels(self) -> None:
         """Re-render the catalogue in every panel that embeds one."""
@@ -692,7 +806,15 @@ class CTC(commands.Cog, name="ctc"):
                     int(row["channel_id"])
                 ) or await self.bot.fetch_channel(int(row["channel_id"]))
                 message = await channel.fetch_message(int(row["message_id"]))
-                await message.edit(**entry_point_payload(self.catalogue, with_catalogue=True))
+                unit = self.units.get(row["unit"]) or self.units.require(self.units.primary)
+                await message.edit(
+                    **entry_point_payload(
+                        unit.catalogue,
+                        with_catalogue=True,
+                        unit=unit.key,
+                        unit_name=unit.name if len(self.units) > 1 else None,
+                    )
+                )
             except discord.NotFound:
                 # Panel deleted; stop tracking it.
                 await self.database.remove_panel(row["message_id"])
@@ -710,16 +832,24 @@ class CTC(commands.Cog, name="ctc"):
         catalogue: bool = True,
         message_id: str | None = None,
     ) -> None:
-        if not self.can_post_panel(interaction):
+        unit = await self.resolve_unit(interaction)
+        if unit is None:
+            return
+        if not self.can_post_panel(unit, interaction.user):
             await interaction.response.send_message(
                 "You do not have the role required to post the panel."
-                if self.role_ids("panel_role_id")
+                if self.role_ids(unit, "panel_role_id")
                 else "You need Manage Server to post the panel.",
                 ephemeral=True,
             )
             return
 
-        payload = entry_point_payload(self.catalogue, with_catalogue=catalogue)
+        payload = entry_point_payload(
+            unit.catalogue,
+            with_catalogue=catalogue,
+            unit=unit.key,
+            unit_name=unit.name if len(self.units) > 1 else None,
+        )
 
         # Adopting an existing panel: rewrite it in place and start tracking it,
         # which is the only way a panel posted before tracking existed can be
@@ -745,14 +875,18 @@ class CTC(commands.Cog, name="ctc"):
                 return
 
             await message.edit(**payload)
-            await self.database.add_panel(str(interaction.channel_id), str(message.id), catalogue)
+            await self.database.add_panel(
+                str(interaction.channel_id), str(message.id), catalogue, unit.key
+            )
             await interaction.response.send_message(
                 "Panel updated and now tracked, so its catalogue stays current.", ephemeral=True
             )
             return
 
         message = await interaction.channel.send(**payload)
-        await self.database.add_panel(str(interaction.channel_id), str(message.id), catalogue)
+        await self.database.add_panel(
+            str(interaction.channel_id), str(message.id), catalogue, unit.key
+        )
         await interaction.response.send_message(
             f"Panel posted{' with the catalogue' if catalogue else ''}. "
             "Pin it so members can always find it."
@@ -767,7 +901,8 @@ class CTC(commands.Cog, name="ctc"):
     # --------------------------------------------------------- flow actions
 
     async def submit_request(self, interaction: discord.Interaction, view: LevelView) -> None:
-        cat = self.catalogue
+        unit = view.unit
+        cat = unit.catalogue
 
         # The picker never offers a WIP badge, but a stale form could carry one.
         wip = [k for k in view.badge_keys if (b := cat.get(k)) and b.wip]
@@ -795,6 +930,7 @@ class CTC(commands.Cog, name="ctc"):
 
         rows = await self.database.create_group(
             guild_id=str(interaction.guild_id),
+            unit=unit.key,
             member_id=str(interaction.user.id),
             member_name=getattr(interaction.user, "display_name", str(interaction.user)),
             notes=view.notes,
@@ -825,7 +961,7 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         own_cancel = action == "cancel" and row["member_id"] == str(interaction.user.id)
-        if not own_cancel and not self.can_work(interaction.user, row["badge_key"]):
+        if not own_cancel and not self.can_work_row(interaction.user, row):
             await interaction.response.send_message(
                 "Only Training Instructors can do that.", ephemeral=True
             )
@@ -842,14 +978,14 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         if action == "assign":
-            if not self.can_assign(interaction.user):
+            if not self.can_assign(self.unit_of(row), interaction.user):
                 await interaction.response.send_message(
                     "You cannot set who is working on a request.", ephemeral=True
                 )
                 return
             view = AssignView(self, row)
             await interaction.response.send_message(
-                f"**{self.catalogue.label(row['badge_key'], row['levels'])}** "
+                f"**{self.catalogue_of(row).label(row['badge_key'], row['levels'])}** "
                 f"for <@{row['member_id']}>",
                 view=view,
                 ephemeral=True,
@@ -891,9 +1027,11 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         await interaction.response.edit_message(
-            embed=ticket_embed(self.catalogue, updated),
+            embed=ticket_embed(self.catalogue_of(updated), updated),
             view=ticket_view(
-                self.catalogue, updated, award_url=self.settings["taw_award_url"] or None
+                self.catalogue_of(updated),
+                updated,
+                award_url=self.settings_of(updated)["taw_award_url"] or None,
             ),
         )
         await self.post_to_thread(updated, f"<@{interaction.user.id}> {verb} this request.")
@@ -902,7 +1040,8 @@ class CTC(commands.Cog, name="ctc"):
             awarded = updated["levels_achieved"] or updated["levels"]
             await self.post_to_thread(
                 updated,
-                f"<@{updated['member_id']}> — **{self.catalogue.label(updated['badge_key'], awarded)}**"
+                f"<@{updated['member_id']}> — "
+                f"**{self.catalogue_of(updated).label(updated['badge_key'], awarded)}**"
                 " is on your record. Congratulations. \N{MILITARY MEDAL}",
             )
             # Close last — anything sent afterwards would reopen the thread.
@@ -914,7 +1053,7 @@ class CTC(commands.Cog, name="ctc"):
         self, interaction: discord.Interaction, row: Any, member: discord.abc.User
     ) -> None:
         """Put a named person on a request on someone else's behalf."""
-        if not self.can_assign(interaction.user):
+        if not self.can_assign(self.unit_of(row), interaction.user):
             await interaction.response.edit_message(
                 content="You cannot set who is working on a request.", view=None
             )
@@ -968,7 +1107,7 @@ class CTC(commands.Cog, name="ctc"):
             )
             return
 
-        cat = self.catalogue
+        cat = self.catalogue_of(updated)
         achieved = cat.parse_levels(updated["badge_key"], updated["levels_achieved"])
         requested = cat.parse_levels(updated["badge_key"], updated["levels"])
         listed = ", ".join(cat.level_name(lvl) for lvl in achieved) if achieved else "none"
@@ -1007,7 +1146,7 @@ class CTC(commands.Cog, name="ctc"):
             )
             return
 
-        cat = self.catalogue
+        cat = self.catalogue_of(updated)
         before = ", ".join(cat.level_name(lvl) for lvl in view.original) or "none"
         after = ", ".join(
             cat.level_name(lvl) for lvl in cat.parse_levels(updated["badge_key"], updated["levels"])
@@ -1060,10 +1199,10 @@ class CTC(commands.Cog, name="ctc"):
         would leave no clutter either, but whether that still resets the clock
         is Discord's business and not something worth betting the queue on.
         """
-        if self.database is None or not self.settings["daily_bump"]:
+        if self.database is None:
             return
         for row in await self.database.queue():
-            if not row["thread_id"]:
+            if not row["thread_id"] or not self.settings_of(row)["daily_bump"]:
                 continue
             try:
                 thread = self.bot.get_channel(
@@ -1104,24 +1243,31 @@ class CTC(commands.Cog, name="ctc"):
         """Chase work going stale, in the relevant ticket's own thread."""
         if self.database is None:
             return
-        settings = self.settings
-        role_ids = self.role_ids("instructor_role_id")
-        mention = self.role_mention("instructor_role_id", "Instructors")
+        # Each battalion sets its own thresholds and tags its own instructors,
+        # so the sweep runs once per unit rather than once overall.
+        for unit in self.units:
+            role_ids = self.role_ids(unit, "instructor_role_id")
+            mention = self.role_mention(unit, "instructor_role_id", "Instructors")
 
-        unclaimed_hours = int(settings["nudge_unclaimed_hours"])
-        for row in await self.database.stale("requested", unclaimed_hours):
-            sent = await self._nudge(
-                row,
-                f"{mention} — still unclaimed after {unclaimed_hours}h: "
-                f"**{self.catalogue.label(row['badge_key'], row['levels'])}** "
-                f"for <@{row['member_id']}>.",
-                role_ids=role_ids,
-            )
-            if sent:
-                await self.database.mark_nudged(int(row["id"]))
+            unclaimed_hours = int(unit.settings["nudge_unclaimed_hours"])
+            for row in await self.database.stale(
+                "requested", unclaimed_hours, unit=unit.key
+            ):
+                sent = await self._nudge(
+                    row,
+                    f"{mention} — still unclaimed after {unclaimed_hours}h: "
+                    f"**{unit.catalogue.label(row['badge_key'], row['levels'])}** "
+                    f"for <@{row['member_id']}>.",
+                    role_ids=role_ids,
+                )
+                if sent:
+                    await self.database.mark_nudged(int(row["id"]))
 
-        unawarded_hours = int(settings["nudge_unawarded_hours"])
-        for row in await self.database.stale("completed", unawarded_hours):
+            await self._nudge_unawarded(unit)
+
+    async def _nudge_unawarded(self, unit: Unit) -> None:
+        unawarded_hours = int(unit.settings["nudge_unawarded_hours"])
+        for row in await self.database.stale("completed", unawarded_hours, unit=unit.key):
             sent = await self._nudge(
                 row,
                 f"<@{row['instructor_id']}> — this was run {unawarded_hours}h ago but isn't "

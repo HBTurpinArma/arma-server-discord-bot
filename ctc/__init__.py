@@ -43,17 +43,18 @@ class CTCDatabaseManager:
         self,
         *,
         connection: aiosqlite.Connection,
-        catalogue: Callable[[], Catalogue],
+        catalogue: Callable[[str | None], Catalogue],
     ) -> None:
         self.connection = connection
         self.connection.row_factory = aiosqlite.Row
         #: Callable rather than a value so edits made through /badge config are
-        #: picked up without rebuilding the manager.
+        #: picked up without rebuilding the manager. Takes a unit key, because
+        #: each battalion validates against its own badge set — a level that is
+        #: legal for one may not exist in the other.
         self._catalogue = catalogue
 
-    @property
-    def catalogue(self) -> Catalogue:
-        return self._catalogue()
+    def catalogue_for(self, unit: str | None) -> Catalogue:
+        return self._catalogue(unit)
 
     # ------------------------------------------------------------ reading
 
@@ -84,31 +85,54 @@ class CTCDatabaseManager:
         )
 
     async def queue(
-        self, *, statuses: Sequence[str] = OPEN_STATUSES, instructor_id: str | None = None
+        self,
+        *,
+        statuses: Sequence[str] = OPEN_STATUSES,
+        instructor_id: str | None = None,
+        unit: str | None = None,
     ) -> list[aiosqlite.Row]:
         placeholders = ",".join("?" for _ in statuses)
         sql = f"SELECT * FROM ctc_requests WHERE status IN ({placeholders})"
         params: list[Any] = list(statuses)
+        if unit:
+            sql += " AND unit = ?"
+            params.append(unit)
         if instructor_id:
             sql += " AND instructor_id = ?"
             params.append(str(instructor_id))
         sql += " ORDER BY created_at ASC"
         return await self._many(sql, params)
 
-    async def stale(self, status: str, hours: int) -> list[aiosqlite.Row]:
-        """Rows sat in `status` longer than `hours`, not nudged in the last day."""
-        return await self._many(
+    async def stale(
+        self, status: str, hours: int, *, unit: str | None = None
+    ) -> list[aiosqlite.Row]:
+        """Rows sat in `status` longer than `hours`, not nudged in the last day.
+
+        Scoped by unit because each battalion sets its own nudge thresholds.
+        """
+        sql = (
             "SELECT * FROM ctc_requests WHERE status = ? "
             "AND created_at <= datetime('now', ?) "
             "AND (last_nudged_at IS NULL OR last_nudged_at <= datetime('now','-24 hours')) "
-            "ORDER BY created_at ASC",
-            (status, f"-{int(hours)} hours"),
         )
+        params: list[Any] = [status, f"-{int(hours)} hours"]
+        if unit:
+            sql += "AND unit = ? "
+            params.append(unit)
+        return await self._many(sql + "ORDER BY created_at ASC", params)
 
-    async def counts_for_badge(self, badge_key: str) -> int:
-        row = await self._one(
-            "SELECT COUNT(*) AS n FROM ctc_requests WHERE badge_key = ?", (badge_key,)
-        )
+    async def counts_for_badge(self, badge_key: str, *, unit: str | None = None) -> int:
+        """How many requests reference a badge.
+
+        Unit-scoped: two battalions can legitimately use the same badge key for
+        different badges, and deleting one must not count the other's history.
+        """
+        sql = "SELECT COUNT(*) AS n FROM ctc_requests WHERE badge_key = ?"
+        params: list[Any] = [badge_key]
+        if unit:
+            sql += " AND unit = ?"
+            params.append(unit)
+        row = await self._one(sql, params)
         return int(row["n"]) if row else 0
 
     # ------------------------------------------------------------ writing
@@ -117,6 +141,7 @@ class CTCDatabaseManager:
         self,
         *,
         guild_id: str,
+        unit: str,
         member_id: str,
         member_name: str,
         notes: str | None,
@@ -129,11 +154,12 @@ class CTCDatabaseManager:
             for badge_key, levels in items:
                 cursor = await self.connection.execute(
                     "INSERT INTO ctc_requests "
-                    "(group_id, guild_id, member_id, member_name, badge_key, levels, notes) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(group_id, guild_id, unit, member_id, member_name, badge_key, levels, notes) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         group_id,
                         str(guild_id),
+                        unit,
                         str(member_id),
                         member_name,
                         badge_key,
@@ -166,7 +192,7 @@ class CTCDatabaseManager:
         if nxt not in TRANSITIONS.get(row["status"], ()):
             raise TransitionError(f"Cannot go from {row['status']} to {nxt}.")
 
-        cat = self.catalogue
+        cat = self.catalogue_for(row["unit"])
         badge = cat.get(row["badge_key"])
         sets = ["status = ?"]
         params: list[Any] = [nxt]
@@ -278,7 +304,7 @@ class CTCDatabaseManager:
                 "Reopen it first if the levels were wrong."
             )
 
-        badge = self.catalogue.get(row["badge_key"])
+        badge = self.catalogue_for(row["unit"]).get(row["badge_key"])
         if badge is None or not badge.needs_level_choice:
             name = badge.name if badge else row["badge_key"]
             raise TransitionError(f"{name} has no requested levels — there is nothing to change.")
@@ -294,7 +320,7 @@ class CTCDatabaseManager:
             "UPDATE ctc_requests SET levels = ?, amended_at = datetime('now'), "
             "amended_by = ?, amended_by_name = ? WHERE id = ?",
             (
-                ",".join(self.catalogue.sort_levels(row["badge_key"], wanted)),
+                ",".join(self.catalogue_for(row["unit"]).sort_levels(row["badge_key"], wanted)),
                 str(actor_id),
                 actor_name,
                 request_id,
@@ -338,19 +364,30 @@ class CTCDatabaseManager:
 
     # -------------------------------------------------------------- panels
 
-    async def add_panel(self, channel_id: str, message_id: str, with_catalogue: bool) -> None:
+    async def add_panel(
+        self, channel_id: str, message_id: str, with_catalogue: bool, unit: str
+    ) -> None:
         await self.connection.execute(
-            "INSERT OR REPLACE INTO ctc_panels (message_id, channel_id, with_catalogue) "
-            "VALUES (?, ?, ?)",
-            (str(message_id), str(channel_id), 1 if with_catalogue else 0),
+            "INSERT OR REPLACE INTO ctc_panels (message_id, channel_id, with_catalogue, unit) "
+            "VALUES (?, ?, ?, ?)",
+            (str(message_id), str(channel_id), 1 if with_catalogue else 0, unit),
         )
         await self.connection.commit()
 
-    async def panels(self, *, with_catalogue_only: bool = False) -> list[aiosqlite.Row]:
+    async def panels(
+        self, *, with_catalogue_only: bool = False, unit: str | None = None
+    ) -> list[aiosqlite.Row]:
         sql = "SELECT * FROM ctc_panels"
+        clauses: list[str] = []
+        params: list[Any] = []
         if with_catalogue_only:
-            sql += " WHERE with_catalogue = 1"
-        return await self._many(sql + " ORDER BY posted_at")
+            clauses.append("with_catalogue = 1")
+        if unit:
+            clauses.append("unit = ?")
+            params.append(unit)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        return await self._many(sql + " ORDER BY posted_at", params)
 
     async def remove_panel(self, message_id: str) -> None:
         await self.connection.execute(
@@ -374,26 +411,39 @@ class CTCDatabaseManager:
 
     # -------------------------------------------------------------- stats
 
-    async def stats(self) -> dict[str, Any]:
+    async def stats(self, *, unit: str | None = None) -> dict[str, Any]:
+        """Pipeline figures, for one battalion or across all of them.
+
+        Badge keys and instructors do not mean the same thing between units, so
+        a mixed report would double-count people and merge unrelated badges.
+        """
+        where = " AND unit = ?" if unit else ""
+        args: list[Any] = [unit] if unit else []
+
         by_status = await self._many(
-            "SELECT status, COUNT(*) AS n FROM ctc_requests GROUP BY status"
+            "SELECT status, COUNT(*) AS n FROM ctc_requests "
+            f"WHERE 1=1{where} GROUP BY status",
+            args,
         )
         by_instructor = await self._many(
             "SELECT instructor_name AS name, COUNT(*) AS total, "
             "SUM(CASE WHEN status IN ('claimed','completed') THEN 1 ELSE 0 END) AS open, "
             "SUM(CASE WHEN status = 'awarded' THEN 1 ELSE 0 END) AS awarded "
-            "FROM ctc_requests WHERE instructor_id IS NOT NULL "
-            "GROUP BY instructor_id, instructor_name ORDER BY total DESC"
+            f"FROM ctc_requests WHERE instructor_id IS NOT NULL{where} "
+            "GROUP BY instructor_id, instructor_name ORDER BY total DESC",
+            args,
         )
         turnaround = await self._many(
             "SELECT badge_key, COUNT(*) AS n, "
             "ROUND(AVG(julianday(awarded_at) - julianday(created_at)), 1) AS avg_days "
-            "FROM ctc_requests WHERE status = 'awarded' AND awarded_at IS NOT NULL "
-            "GROUP BY badge_key ORDER BY n DESC"
+            "FROM ctc_requests WHERE status = 'awarded' AND awarded_at IS NOT NULL"
+            f"{where} GROUP BY badge_key ORDER BY n DESC",
+            args,
         )
         oldest_open = await self._one(
-            "SELECT * FROM ctc_requests WHERE status IN ('requested','claimed','completed') "
-            "ORDER BY created_at ASC LIMIT 1"
+            "SELECT * FROM ctc_requests WHERE status IN ('requested','claimed','completed')"
+            f"{where} ORDER BY created_at ASC LIMIT 1",
+            args,
         )
         return {
             "by_status": by_status,

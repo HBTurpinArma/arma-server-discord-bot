@@ -102,6 +102,79 @@ Members need **View Channel** on the parent channel; thread visibility is
 inherited and cannot be granted separately. Deny them Send Messages and allow
 Send Messages in Threads to keep the channel a clean list.
 
+## Several battalions in one server
+
+More than one unit can run its own training pipeline in the same Discord
+server. Each gets its own badge catalogue, queue channel, instructors and
+panel; nothing is shared unless you share it.
+
+The guild cannot tell them apart on its own — both battalions have the same
+`guild_id` — so every request, panel and interaction carries a **unit key**.
+
+```json
+"combat_training_centre": {
+  "taw_award_url": "https://www.taw.net/",
+  "private_threads": true,
+  "primary_unit": "am2",
+  "units": {
+    "am2": {
+      "name": "2nd Battalion",
+      "catalogue": "catalogue.json",
+      "queue_channel_id": 1111111111111111111,
+      "instructor_role_id": [1111111111111111111, 2222222222222222222],
+      "assign_role_id": 2222222222222222222,
+      "config_role_id": 2222222222222222222,
+      "member_role_id": 3333333333333333333
+    },
+    "am1": {
+      "name": "1st Battalion",
+      "catalogue": "am1.json",
+      "queue_channel_id": 4444444444444444444,
+      "instructor_role_id": [5555555555555555555],
+      "member_role_id": 6666666666666666666
+    }
+  }
+}
+```
+
+Settings resolve most-specific-first: **cog defaults → the shared block → the
+unit's own block**. So `taw_award_url` and `private_threads` above apply to
+both, while channels and roles stay per unit.
+
+`catalogue` is a filename beside the code in `ctc/`. Each unit needs its own,
+and `/badge config` only ever edits the one belonging to the unit the session
+started in.
+
+### Which battalion is this?
+
+Resolved in order, stopping at the first that answers:
+
+1. the request thread the interaction is in — the row knows its own unit
+2. the queue channel it was run in, or that channel's parent
+3. the only configured unit, when there is just one
+4. the member's own roles, if they match **exactly one** unit
+
+Somebody who staffs both battalions matches neither at step 4, so they are
+asked to run the command in the right channel rather than being guessed at and
+silently filed under the wrong one.
+
+Panels resolve without any of that: the button carries its unit in its
+custom_id, so a panel can only ever open its own battalion's badges.
+
+### Upgrading a single-battalion setup
+
+Nothing to do. With no `units` block the whole config is read as one unit keyed
+`default`, so an existing `config.json` keeps working untouched — which matters,
+because that file lives on the host and is not deployed with the code.
+
+On first start the `unit` column is added and every existing row is filed under
+`primary_unit` (or the first unit listed). Panels pinned before the upgrade keep
+working too: their old `ctc:panel:open` id resolves to the primary unit.
+
+To split later, add the `units` block and set `primary_unit` to whichever key
+represents the battalion that was already running — that is where the history
+goes.
+
 ## Commands
 
 | Command | Who | What |
@@ -285,7 +358,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-60 offline checks — catalogue validation, all three badge kinds, variants, the
+65 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 

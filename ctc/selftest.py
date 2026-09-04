@@ -19,8 +19,10 @@ from pathlib import Path
 import aiosqlite
 import discord
 
+from cogs.ctc import DEFAULTS
 from ctc import CTCDatabaseManager, TransitionError
 from ctc import catalogue as catalogue_module
+from ctc.units import Units
 from ctc.views import (
     MAX_BADGES_PER_REQUEST,
     PANEL_CUSTOM_ID,
@@ -28,7 +30,7 @@ from ctc.views import (
     AmendView,
     BadgePickerView,
     LevelView,
-    PanelView,
+    PanelButton,
     ResultView,
     TicketButton,
     catalogue_embed,
@@ -81,15 +83,43 @@ class FakeMember(discord.Member):
         return self._roles
 
 
+class FakeUnit:
+    """A single battalion, standing in for ctc.units.Unit."""
+
+    def __init__(self, catalogue, key: str = "default", name: str = "Test Battalion") -> None:
+        self.key = key
+        self.name = name
+        self.catalogue = catalogue
+        self.settings = dict(DEFAULTS)
+
+
+class FakeUnits:
+    def __init__(self, *units) -> None:
+        self._by_key = {u.key: u for u in units}
+        self.primary = next(iter(self._by_key))
+
+    def __len__(self):
+        return len(self._by_key)
+
+    def __iter__(self):
+        return iter(self._by_key.values())
+
+    def get(self, key):
+        return self._by_key.get(key)
+
+    def require(self, key):
+        return self._by_key[key]
+
+
 class FakeCog:
     """Just enough of the cog for the views to build."""
 
     def __init__(self, catalogue) -> None:
-        self._catalogue = catalogue
+        self.unit = FakeUnit(catalogue)
+        self.units = FakeUnits(self.unit)
 
-    @property
-    def catalogue(self):
-        return self._catalogue
+    def unit_of(self, row):
+        return self.units.get(row["unit"]) or self.unit
 
 
 def unwrap(item):
@@ -146,6 +176,11 @@ def select_named(view: discord.ui.View, fragment: str):
         if fragment.lower() in (select.placeholder or "").lower():
             return select
     return None
+
+
+def _cog(catalogue) -> FakeCog:
+    """A cog whose single unit wraps this catalogue."""
+    return FakeCog(catalogue)
 
 
 # ---------------------------------------------------------------- catalogue
@@ -275,7 +310,7 @@ def _() -> None:
 
 @check("badge picker offers only requestable badges, capped at five")
 def _() -> None:
-    view = BadgePickerView(FakeCog(CAT), FakeUser())
+    view = BadgePickerView(_cog(CAT), FakeUser(), _cog(CAT).unit)
     assert_component_limits(view, "picker")
     select = view.select
     assert len(select.options) == len(CAT.requestable())
@@ -288,7 +323,7 @@ def _() -> None:
 
 @check("timed tests and tabs get no level dropdown")
 def _() -> None:
-    view = LevelView(FakeCog(CAT), FakeUser(), ["cqc", "gun_range", "airborne"])
+    view = LevelView(_cog(CAT), FakeUser(), ["cqc", "gun_range", "airborne"], _cog(CAT).unit)
     assert_component_limits(view, "levels/none")
     assert not [i for i in view.children if isinstance(i, discord.ui.Select)]
     submit = button_named(view, "Submit")
@@ -298,7 +333,7 @@ def _() -> None:
 
 @check("graded badges gate submission until every one has a level")
 def _() -> None:
-    view = LevelView(FakeCog(CAT), FakeUser(), ["cqc", "grenadier"])
+    view = LevelView(_cog(CAT), FakeUser(), ["cqc", "grenadier"], _cog(CAT).unit)
     assert_component_limits(view, "levels/mixed")
     assert len([i for i in view.children if isinstance(i, discord.ui.Select)]) == 1
     submit = button_named(view, "Submit")
@@ -315,7 +350,7 @@ def _() -> None:
 def _() -> None:
     graded = [b.key for b in CAT.requestable() if b.needs_level_choice][:5]
     assert len(graded) == 5, "fixture needs five graded badges"
-    view = LevelView(FakeCog(CAT), FakeUser(), graded)
+    view = LevelView(_cog(CAT), FakeUser(), graded, _cog(CAT).unit)
     assert_component_limits(view, "levels/page1")
     assert len([i for i in view.children if isinstance(i, discord.ui.Select)]) == 4
     assert "Page 1 of 2" in view.content()
@@ -328,7 +363,7 @@ def _() -> None:
 
 @check("each level dropdown offers only that badge's own levels")
 def _() -> None:
-    view = LevelView(FakeCog(CAT), FakeUser(), ["medical", "grenadier"])
+    view = LevelView(_cog(CAT), FakeUser(), ["medical", "grenadier"], _cog(CAT).unit)
     medical = select_named(view, "Medical")
     grenadier = select_named(view, "Grenadier")
     assert [o.value for o in medical.options] == ["B", "A"], "Medical has no Expert"
@@ -391,7 +426,7 @@ def _() -> None:
     assert "grenadier" in [b.key for b in cat.requestable()], "still requestable at Basic"
 
     # The picker must not offer a level nobody can be tested on.
-    view = LevelView(FakeCog(cat), FakeUser(), ["grenadier"])
+    view = LevelView(_cog(cat), FakeUser(), ["grenadier"], _cog(cat).unit)
     select = select_named(view, "Grenadier")
     assert [o.value for o in select.options] == ["B"]
     assert select.max_values == 1
@@ -485,16 +520,17 @@ def _() -> None:
         }}}
 
     cog = CTC.__new__(CTC)
-    cog.bot = Bot()
+    cog.units = Units(Bot.config["discord"]["combat_training_centre"], DEFAULTS)
+    unit = cog.units.require("default")
 
-    assert cog.role_ids("instructor_role_id") == [111, 222], "a list of roles"
-    assert cog.role_ids("config_role_id") == [333], "a bare id still works"
-    assert cog.role_ids("panel_role_id") == [], "empty means unset"
+    assert cog.role_ids(unit, "instructor_role_id") == [111, 222], "a list of roles"
+    assert cog.role_ids(unit, "config_role_id") == [333], "a bare id still works"
+    assert cog.role_ids(unit, "panel_role_id") == [], "empty means unset"
 
     # Every configured role gets mentioned, not just the first.
-    assert cog.role_mention("instructor_role_id", "x") == "<@&111> <@&222>"
-    assert cog.role_mention("config_role_id", "x") == "<@&333>"
-    assert cog.role_mention("panel_role_id", "nobody") == "nobody", "falls back when unset"
+    assert cog.role_mention(unit, "instructor_role_id", "x") == "<@&111> <@&222>"
+    assert cog.role_mention(unit, "config_role_id", "x") == "<@&333>"
+    assert cog.role_mention(unit, "panel_role_id", "nobody") == "nobody", "falls back when unset"
 
     # Nothing may pass a role setting straight to int().
     source = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
@@ -507,12 +543,13 @@ def _() -> None:
 
 @check("the panel renders with and without the catalogue")
 def _() -> None:
-    plain = entry_point_payload(CAT, with_catalogue=False)
+    plain = entry_point_payload(CAT, with_catalogue=False, unit="default")
     assert len(plain["embeds"]) == 1
-    both = entry_point_payload(CAT, with_catalogue=True)
+    both = entry_point_payload(CAT, with_catalogue=True, unit="default")
     assert len(both["embeds"]) == 2
     assert both["embeds"][0].title.endswith("Badge catalogue")
-    assert isinstance(plain["view"], PanelView), "the panel must be a persistent view"
+    panel_item = plain["view"].children[0]
+    assert isinstance(panel_item, PanelButton), "the panel must be a persistent dynamic item"
 
 
 @check("the panel button is not swallowed by the ticket button template")
@@ -554,13 +591,17 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
         with (ROOT / "schema.sql").open() as handle:
             await connection.executescript(handle.read())
         await connection.commit()
-        db = CTCDatabaseManager(connection=connection, catalogue=lambda: CAT)
+        db = CTCDatabaseManager(connection=connection, catalogue=lambda _unit: CAT)
 
         state: dict[str, object] = {}
 
         async def one_ticket_per_badge():
             rows = await db.create_group(
-                guild_id="g", member_id="m1", member_name="Pvt. Hall", notes="Weeknights",
+                guild_id="g",
+                unit="default",
+                member_id="m1",
+                member_name="Pvt. Hall",
+                notes="Weeknights",
                 items=[("airborne", []), ("grenadier", ["B", "A", "E"]), ("cqc", [])],
             )
             assert len(rows) == 3, "three badges, three tickets"
@@ -572,7 +613,12 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         async def happy_path():
             row = state["rows"][1]
-            r = await db.transition(row["id"], "claimed", instructor_id="ti1", instructor_name="Sgt")
+            r = await db.transition(
+                row["id"],
+                "claimed",
+                instructor_id="ti1",
+                instructor_name="Sgt",
+            )
             assert r["status"] == "claimed" and r["instructor_id"] == "ti1"
             r = await db.transition(row["id"], "completed")
             assert r["levels_achieved"] == "B,A,E", "no result given means a clean sweep"
@@ -592,7 +638,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         async def double_click_is_harmless():
             rows = await db.create_group(
-                guild_id="g", member_id="m2", member_name="Pvt. Two", notes=None,
+                guild_id="g", unit="default", member_id="m2", member_name="Pvt. Two", notes=None,
                 items=[("scouting", ["B"])],
             )
             rid = rows[0]["id"]
@@ -607,7 +653,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         async def timed_awards_one_level():
             rows = await db.create_group(
-                guild_id="g", member_id="m3", member_name="Pvt. Three", notes=None,
+                guild_id="g", unit="default", member_id="m3", member_name="Pvt. Three", notes=None,
                 items=[("gun_range", [])],
             )
             rid = rows[0]["id"]
@@ -640,7 +686,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         async def graded_can_clear_several():
             rows = await db.create_group(
-                guild_id="g", member_id="m4", member_name="Pvt. Four", notes=None,
+                guild_id="g", unit="default", member_id="m4", member_name="Pvt. Four", notes=None,
                 items=[("grenadier", ["B", "A", "E"])],
             )
             rid = rows[0]["id"]
@@ -659,11 +705,16 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         async def amend_the_request():
             rows = await db.create_group(
-                guild_id="g", member_id="m5", member_name="Pvt. Five", notes=None,
+                guild_id="g", unit="default", member_id="m5", member_name="Pvt. Five", notes=None,
                 items=[("grenadier", ["B"])],
             )
             rid = rows[0]["id"]
-            r = await db.amend_request(rid, levels=["E", "B", "A"], actor_id="ti9", actor_name="Fixer")
+            r = await db.amend_request(
+                rid,
+                levels=["E", "B", "A"],
+                actor_id="ti9",
+                actor_name="Fixer",
+            )
             assert r["levels"] == "B,A,E", "stored in progression order"
             assert r["status"] == "requested", "amending does not move it along"
             assert r["amended_by_name"] == "Fixer"
@@ -687,7 +738,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         async def timed_and_tabs_have_nothing_to_amend():
             rows = await db.create_group(
-                guild_id="g", member_id="m6", member_name="Pvt. Six", notes=None,
+                guild_id="g", unit="default", member_id="m6", member_name="Pvt. Six", notes=None,
                 items=[("cqc", []), ("airborne", [])],
             )
             for row in rows:
@@ -718,8 +769,8 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
         async def panels_are_tracked_for_refresh():
             assert await db.panels() == [], "nothing tracked yet"
 
-            await db.add_panel("chan-1", "msg-1", True)
-            await db.add_panel("chan-1", "msg-2", False)
+            await db.add_panel("chan-1", "msg-1", True, "default")
+            await db.add_panel("chan-1", "msg-2", False, "default")
             assert len(await db.panels()) == 2
 
             # Only panels embedding a catalogue need re-rendering.
@@ -727,7 +778,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             assert [r["message_id"] for r in with_cat] == ["msg-1"]
 
             # Re-posting over the same message must not duplicate the row.
-            await db.add_panel("chan-1", "msg-1", True)
+            await db.add_panel("chan-1", "msg-1", True, "default")
             assert len(await db.panels()) == 2
 
             await db.remove_panel("msg-1")
@@ -740,7 +791,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
 
         async def assigning_a_request():
             rows = await db.create_group(
-                guild_id="g", member_id="m9", member_name="Pvt. Nine", notes=None,
+                guild_id="g", unit="default", member_id="m9", member_name="Pvt. Nine", notes=None,
                 items=[("rotary", ["B"])],
             )
             rid = rows[0]["id"]
@@ -887,7 +938,10 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             ("an open request's levels can be amended", amend_the_request),
             ("timed tests and tabs have nothing to amend", timed_and_tabs_have_nothing_to_amend),
             ("the queue excludes finished work and nudges cool down", queue_and_stale),
-            ("panels are tracked so the catalogue can be refreshed", panels_are_tracked_for_refresh),
+            (
+                "panels are tracked so the catalogue can be refreshed",
+                panels_are_tracked_for_refresh,
+            ),
             ("stats report status, load and turnaround", stats_report),
             ("a request can be assigned, reassigned and picked up", assigning_a_request),
             ("ticket cards render the right buttons per status", cards_render_for_every_status),
@@ -1040,9 +1094,8 @@ def _() -> None:
     OUTSIDER = 999999999999999999
 
     cog = CTC.__new__(CTC)
-    cog._catalogue = CAT
-    cog.bot = type("B", (), {"config": {"discord": {"combat_training_centre": {
-        "instructor_role_id": INSTRUCTOR_ROLE}}}})()
+    cog.units = Units({"instructor_role_id": INSTRUCTOR_ROLE}, DEFAULTS)
+    unit = cog.units.require("default")
 
     instructor = FakeMember(555555555555555555, [INSTRUCTOR_ROLE])
     aviator = FakeMember(AVIATOR)
@@ -1050,21 +1103,21 @@ def _() -> None:
 
     # The named aviator works Rotary and Fixed Wing...
     for key in ("rotary", "fixed_wing"):
-        assert cog.can_work(aviator, key), f"aviator locked out of {key}"
+        assert cog.can_work(unit, aviator, key), f"aviator locked out of {key}"
     # ...but is nobody special on a badge that does not name them.
-    assert not cog.can_work(aviator, "medical"), "aviator should not reach Medical"
+    assert not cog.can_work(unit, aviator, "medical"), "aviator should not reach Medical"
 
     # Instructors keep working everything, including the aviation badges.
     for key in ("rotary", "medical", "airborne"):
-        assert cog.can_work(instructor, key), f"instructor locked out of {key}"
+        assert cog.can_work(unit, instructor, key), f"instructor locked out of {key}"
 
     # Everyone else stays out.
     for key in ("rotary", "medical"):
-        assert not cog.can_work(outsider, key), f"outsider reached {key}"
+        assert not cog.can_work(unit, outsider, key), f"outsider reached {key}"
 
     # A missing or unknown badge key must not throw or grant anything.
-    assert not cog.can_work(aviator, None)
-    assert not cog.can_work(aviator, "no_such_badge")
+    assert not cog.can_work(unit, aviator, None)
+    assert not cog.can_work(unit, aviator, "no_such_badge")
 
 
 @check("a role named as an extra trainer also grants access")
@@ -1082,13 +1135,13 @@ def _() -> None:
     cat = catalogue_module.Catalogue(raw)
 
     cog = CTC.__new__(CTC)
-    cog._catalogue = cat
-    cog.bot = type("B", (), {"config": {"discord": {"combat_training_centre": {
-        "instructor_role_id": 1001588316602368090}}}})()
+    cog.units = Units({"instructor_role_id": 1001588316602368090}, DEFAULTS)
+    unit = cog.units.require("default")
+    unit.catalogue = cat
 
     holder = FakeMember(777777777777777777, [SPECIALIST_ROLE])
-    assert cog.can_work(holder, "medical"), "role-based extra trainer locked out"
-    assert not cog.can_work(holder, "rotary"), "role should not carry to other badges"
+    assert cog.can_work(unit, holder, "medical"), "role-based extra trainer locked out"
+    assert not cog.can_work(unit, holder, "rotary"), "role should not carry to other badges"
 
 
 @check("named trainers are added to the thread, roles cannot be")
@@ -1111,10 +1164,11 @@ def _() -> None:
 
     def cog_with(**ctc_settings):
         cog = CTC.__new__(CTC)
-        cog._catalogue = CAT
-        cog.bot = type("B", (), {"config": {"discord": {
-            "combat_training_centre": {"instructor_role_id": INSTRUCTOR, **ctc_settings}}}})()
+        cog.units = Units({"instructor_role_id": INSTRUCTOR, **ctc_settings}, DEFAULTS)
         return cog
+
+    def unit_of(cog):
+        return cog.units.require("default")
 
     instructor = FakeMember(1, [INSTRUCTOR])
     specialist = FakeMember(2, [SPECIALIST])
@@ -1122,20 +1176,20 @@ def _() -> None:
 
     # Unset: falls back to the instructor roles, so it works out of the box.
     loose = cog_with()
-    assert loose.can_assign(instructor)
-    assert not loose.can_assign(specialist)
-    assert not loose.can_assign(nobody)
+    assert loose.can_assign(unit_of(loose), instructor)
+    assert not loose.can_assign(unit_of(loose), specialist)
+    assert not loose.can_assign(unit_of(loose), nobody)
 
     # Set: narrows to exactly that role, instructors included.
     tight = cog_with(assign_role_id=SPECIALIST)
-    assert tight.can_assign(specialist)
-    assert not tight.can_assign(instructor), "narrowing must actually exclude"
-    assert not tight.can_assign(nobody)
+    assert tight.can_assign(unit_of(tight), specialist)
+    assert not tight.can_assign(unit_of(tight), instructor), "narrowing must actually exclude"
+    assert not tight.can_assign(unit_of(tight), nobody)
 
     # A list of roles works, as everywhere else.
     both = cog_with(assign_role_id=[SPECIALIST, INSTRUCTOR])
-    assert both.can_assign(specialist) and both.can_assign(instructor)
-    assert not both.can_assign(nobody)
+    assert both.can_assign(unit_of(both), specialist) and both.can_assign(unit_of(both), instructor)
+    assert not both.can_assign(unit_of(both), nobody)
 
 
 @check("the assign picker preselects whoever holds the request")
@@ -1143,7 +1197,7 @@ def _() -> None:
     from ctc.views import AssignView
 
     claimed = {"id": 1, "instructor_id": "189362064995778560", "badge_key": "rotary",
-               "levels": "B", "member_id": "5", "status": "claimed"}
+               "levels": "B", "member_id": "5", "status": "claimed", "unit": "default"}
     view = AssignView(FakeCog(CAT), claimed)
     assert_component_limits(view, "assign")
     picker = selects(view)[0]
@@ -1217,7 +1271,7 @@ def _() -> None:
     assert "AllowedMentions.none()" in bump
     # Posting into an archived thread would silently unarchive it.
     assert 'getattr(thread, "archived", False)' in bump
-    assert 'self.settings["daily_bump"]' in bump
+    assert 'daily_bump' in bump
     # Runs once a day at a fixed time, not on an interval.
     assert "tasks.loop(time=datetime.time(hour=0, minute=0" in src
     assert "self.bump_loop.start()" in src
@@ -1267,18 +1321,113 @@ def _() -> None:
                 await db.execute("INSERT INTO ctc_requests (status) VALUES ('requested')")
                 await db.commit()
 
-                await ensure_columns(db)
+                await ensure_columns(db, "default")
                 await db.commit()
                 cursor = await db.execute("PRAGMA table_info(ctc_requests)")
                 assert "bump_message_id" in {r[1] for r in await cursor.fetchall()}
 
                 # Running again must not raise -- it happens on every startup.
-                await ensure_columns(db)
+                await ensure_columns(db, "default")
                 await db.commit()
                 cursor = await db.execute("SELECT COUNT(*) FROM ctc_requests")
                 assert (await cursor.fetchone())[0] == 1, "existing rows survive"
 
     _asyncio.run(run())
+
+
+
+@check("a single-battalion config still works untouched")
+def _() -> None:
+    # config.json lives on the host and is not deployed with the code, so an
+    # upgrade must not require editing it before the bot will start.
+    units = Units({"instructor_role_id": 111, "queue_channel_id": 222}, DEFAULTS)
+    assert units.keys() == ["default"], units.keys()
+    assert units.primary == "default"
+    assert units.only is not None, "one unit means never having to ask which"
+    assert units.require("default").settings["instructor_role_id"] == 111
+
+
+@check("units keep separate badges, channels and staff")
+def _() -> None:
+    cfg = {
+        "taw_award_url": "https://www.taw.net/",
+        "primary_unit": "am2",
+        "units": {
+            "am2": {"name": "2nd Battalion", "queue_channel_id": 10, "instructor_role_id": [1]},
+            "am1": {"name": "1st Battalion", "queue_channel_id": 20, "instructor_role_id": [2]},
+        },
+    }
+    units = Units(cfg, DEFAULTS)
+    assert len(units) == 2
+    assert units.primary == "am2"
+    assert units.only is None, "two units must never resolve implicitly"
+
+    # Shared keys reach both; per-unit keys do not leak.
+    assert units.require("am1").settings["taw_award_url"] == "https://www.taw.net/"
+    assert units.require("am1").settings["queue_channel_id"] == 20
+    assert units.require("am2").settings["queue_channel_id"] == 10
+
+    # Routing by channel, including a thread's parent.
+    assert units.for_channel(10).key == "am2"
+    assert units.for_channel(20).key == "am1"
+    assert units.for_channel(999) is None
+
+    # Routing by role, and the ambiguity guard that matters most.
+    assert units.for_member(FakeMember(1, [1])).key == "am2"
+    assert units.for_member(FakeMember(2, [2])).key == "am1"
+    assert units.for_member(FakeMember(3, [1, 2])) is None, "both battalions is ambiguous"
+    assert units.for_member(FakeMember(4)) is None
+
+
+@check("a bad units block is rejected rather than half-loaded")
+def _() -> None:
+    from ctc.units import UnitError
+
+    bad = [
+        ({"units": {"Bad Key": {}}}, "key"),
+        ({"units": {"am1": {"catalogue": "nope.json"}}}, "does not exist"),
+        ({"units": {"am1": {}}, "primary_unit": "am9"}, "primary_unit"),
+    ]
+    for cfg, fragment in bad:
+        try:
+            Units(cfg, DEFAULTS)
+        except UnitError as error:
+            assert fragment.lower() in str(error).lower(), f"{fragment} vs {error}"
+        else:
+            raise AssertionError(f"expected {fragment!r} to be rejected")
+
+
+@check("panels carry their unit and old ones still resolve")
+def _() -> None:
+    from ctc.views import LEGACY_PANEL_UNIT, PanelButton
+
+    pattern = PanelButton.__discord_ui_compiled_template__
+    assert pattern.fullmatch("ctc:panel:am2")["unit"] == "am2"
+    assert pattern.fullmatch("ctc:panel:am1")["unit"] == "am1"
+
+    # A panel pinned before battalions existed must keep working.
+    legacy = pattern.fullmatch(f"ctc:panel:{LEGACY_PANEL_UNIT}")
+    assert legacy is not None and legacy["unit"] == LEGACY_PANEL_UNIT
+    assert f"ctc:panel:{LEGACY_PANEL_UNIT}" == PANEL_CUSTOM_ID
+
+    # The two templates must not poach each other's ids -- a loose panel
+    # pattern is what broke ticket buttons once already.
+    ticket = TicketButton.__discord_ui_compiled_template__
+    assert ticket.fullmatch("ctc:panel:am2") is None
+    assert pattern.fullmatch("ctc:claim:42") is None
+
+
+@check("the schema is applied after the columns it indexes exist")
+def _() -> None:
+    # Upgrade-only trap: CREATE TABLE IF NOT EXISTS leaves a live table alone,
+    # so an index over a newly added column runs against a column that is not
+    # there yet. Columns must be added before the schema file is executed.
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    load = src[src.index("async def cog_load"):src.index("async def cog_unload")]
+    assert load.index("ensure_columns(") < load.index("executescript("), (
+        "ensure_columns must run before the schema script"
+    )
+    assert "idx_ctc_requests_unit" in (ROOT / "schema.sql").read_text(encoding="utf-8")
 
 
 def main() -> int:

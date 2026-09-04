@@ -43,29 +43,57 @@ def _badge_options(cat: Catalogue, selected: str | None = None) -> list[discord.
 class _Editable(discord.ui.View):
     """Shared plumbing: who may use it, and how an edit is applied."""
 
-    def __init__(self, cog: Any, actor: discord.abc.User, notice: str | None = None) -> None:
+    def __init__(
+        self,
+        cog: Any,
+        actor: discord.abc.User,
+        notice: str | None = None,
+        *,
+        unit: Any = None,
+    ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.actor = actor
         self.notice = notice
+        #: Which battalion's catalogue this editor is pointed at. Every screen
+        #: passes it on, so a config session cannot drift into the other unit's
+        #: badges half way through.
+        self.unit = unit if unit is not None else cog.units.require(cog.units.primary)
 
     @property
     def cat(self) -> Catalogue:
-        return self.cog.catalogue
+        return self.unit.catalogue
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.actor.id
 
-    async def apply(self, interaction: discord.Interaction, fn, notice: str, key: str | None) -> None:
+    async def apply(
+        self,
+        interaction: discord.Interaction,
+        fn,
+        notice: str,
+        key: str | None,
+    ) -> None:
         try:
-            self.cog.apply_catalogue_edit(fn)
+            self.cog.apply_catalogue_edit(self.unit, fn)
         except (CatalogueError, ValueError) as error:
-            target = ConfigEditorView(self.cog, self.actor, key, f"\N{WARNING SIGN} {error}") if key \
-                else ConfigRootView(self.cog, self.actor, f"\N{WARNING SIGN} {error}")
+            target = ConfigEditorView(
+                self.cog,
+                self.actor,
+                key,
+                f"\N{WARNING SIGN} {error}",
+                unit=self.unit,
+            ) if key \
+                else ConfigRootView(
+                    self.cog,
+                    self.actor,
+                    f"\N{WARNING SIGN} {error}",
+                    unit=self.unit,
+                )
             await interaction.response.edit_message(content=target.content(), view=target)
             return
-        target = ConfigEditorView(self.cog, self.actor, key, notice) if key \
-            else ConfigRootView(self.cog, self.actor, notice)
+        target = ConfigEditorView(self.cog, self.actor, key, notice, unit=self.unit) if key \
+            else ConfigRootView(self.cog, self.actor, notice, unit=self.unit)
         await interaction.response.edit_message(content=target.content(), view=target)
 
 
@@ -78,7 +106,9 @@ class _BadgePick(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         key = self.values[0]
         if not self.availability:
-            view = ConfigEditorView(self.parent_view.cog, self.parent_view.actor, key)
+            view = ConfigEditorView(
+                self.parent_view.cog, self.parent_view.actor, key, unit=self.parent_view.unit
+            )
             await interaction.response.edit_message(content=view.content(), view=view)
             return
 
@@ -90,23 +120,31 @@ class _BadgePick(discord.ui.Select):
                 entry["wip"] = True
 
         try:
-            self.parent_view.cog.apply_catalogue_edit(toggle)
+            self.parent_view.cog.apply_catalogue_edit(self.parent_view.unit, toggle)
         except CatalogueError as error:
             view = AvailabilityView(
-                self.parent_view.cog, self.parent_view.actor, f"\N{WARNING SIGN} {error}"
+                self.parent_view.cog,
+                self.parent_view.actor,
+                f"\N{WARNING SIGN} {error}",
+                unit=self.parent_view.unit,
             )
         else:
-            badge = self.parent_view.cog.catalogue.get(key)
+            badge = self.parent_view.unit.catalogue.get(key)
             state = "in development" if badge and badge.wip else "available"
             view = AvailabilityView(
-                self.parent_view.cog, self.parent_view.actor, f"**{badge.name}** is now {state}."
+                self.parent_view.cog,
+                self.parent_view.actor,
+                f"**{badge.name}** is now {state}.",
+                unit=self.parent_view.unit,
             )
         await interaction.response.edit_message(content=view.content(), view=view)
 
 
 class ConfigRootView(_Editable):
-    def __init__(self, cog: Any, actor: discord.abc.User, notice: str | None = None) -> None:
-        super().__init__(cog, actor, notice)
+    def __init__(
+        self, cog: Any, actor: discord.abc.User, notice: str | None = None, *, unit: Any = None
+    ) -> None:
+        super().__init__(cog, actor, notice, unit=unit)
         self.add_item(_BadgePick(self, "Edit a badge…", availability=False))
 
         add = discord.ui.Button(label="Add badge", style=discord.ButtonStyle.success, row=1)
@@ -125,16 +163,20 @@ class ConfigRootView(_Editable):
         )
 
     async def on_add(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(NameModal(self.cog, self.actor, key=None))
+        await interaction.response.send_modal(
+            NameModal(self.cog, self.actor, key=None, unit=self.unit),
+        )
 
     async def on_availability(self, interaction: discord.Interaction) -> None:
-        view = AvailabilityView(self.cog, self.actor)
+        view = AvailabilityView(self.cog, self.actor, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
 
 class AvailabilityView(_Editable):
-    def __init__(self, cog: Any, actor: discord.abc.User, notice: str | None = None) -> None:
-        super().__init__(cog, actor, notice)
+    def __init__(
+        self, cog: Any, actor: discord.abc.User, notice: str | None = None, *, unit: Any = None
+    ) -> None:
+        super().__init__(cog, actor, notice, unit=unit)
         self.add_item(_BadgePick(self, "Toggle a badge…", availability=True))
         back = discord.ui.Button(label="Back", row=1)
         back.callback = self.on_back
@@ -154,7 +196,7 @@ class AvailabilityView(_Editable):
         )
 
     async def on_back(self, interaction: discord.Interaction) -> None:
-        view = ConfigRootView(self.cog, self.actor)
+        view = ConfigRootView(self.cog, self.actor, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
 
@@ -259,9 +301,15 @@ class _WipLevelsSelect(discord.ui.Select):
 
 class ConfigEditorView(_Editable):
     def __init__(
-        self, cog: Any, actor: discord.abc.User, key: str, notice: str | None = None
+        self,
+        cog: Any,
+        actor: discord.abc.User,
+        key: str,
+        notice: str | None = None,
+        *,
+        unit: Any = None,
     ) -> None:
-        super().__init__(cog, actor, notice)
+        super().__init__(cog, actor, notice, unit=unit)
         self.key = key
         badge = self.cat.get(key)
         if badge is None:
@@ -340,13 +388,17 @@ class ConfigEditorView(_Editable):
         return "\n".join(line for line in lines if line)
 
     async def on_rename(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(NameModal(self.cog, self.actor, key=self.key))
+        await interaction.response.send_modal(
+            NameModal(self.cog, self.actor, key=self.key, unit=self.unit),
+        )
 
     async def on_variants(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(VariantsModal(self.cog, self.actor, self.key))
+        await interaction.response.send_modal(
+            VariantsModal(self.cog, self.actor, self.key, unit=self.unit),
+        )
 
     async def on_trainers(self, interaction: discord.Interaction) -> None:
-        view = ExtraTrainersView(self.cog, self.actor, self.key)
+        view = ExtraTrainersView(self.cog, self.actor, self.key, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
     async def on_timed(self, interaction: discord.Interaction) -> None:
@@ -376,12 +428,12 @@ class ConfigEditorView(_Editable):
         await self.apply(interaction, edit, notice, key)
 
     async def on_back(self, interaction: discord.Interaction) -> None:
-        view = ConfigRootView(self.cog, self.actor)
+        view = ConfigRootView(self.cog, self.actor, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
     async def on_delete(self, interaction: discord.Interaction) -> None:
-        used = await self.cog.database.counts_for_badge(self.key)
-        view = DeleteConfirmView(self.cog, self.actor, self.key, used)
+        used = await self.cog.database.counts_for_badge(self.key, unit=self.unit.key)
+        view = DeleteConfirmView(self.cog, self.actor, self.key, used, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
 
@@ -444,9 +496,15 @@ class ExtraTrainersView(_Editable):
     """Who gets pinged for one badge on top of the instructor roles."""
 
     def __init__(
-        self, cog: Any, actor: discord.abc.User, key: str, notice: str | None = None
+        self,
+        cog: Any,
+        actor: discord.abc.User,
+        key: str,
+        notice: str | None = None,
+        *,
+        unit: Any = None,
     ) -> None:
-        super().__init__(cog, actor, notice)
+        super().__init__(cog, actor, notice, unit=unit)
         self.key = key
         badge = self.cat.get(key)
         if badge is None:
@@ -488,13 +546,15 @@ class ExtraTrainersView(_Editable):
         await self.apply(interaction, edit, "Extra trainers cleared.", key)
 
     async def on_back(self, interaction: discord.Interaction) -> None:
-        view = ConfigEditorView(self.cog, self.actor, self.key)
+        view = ConfigEditorView(self.cog, self.actor, self.key, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
 
 class DeleteConfirmView(_Editable):
-    def __init__(self, cog: Any, actor: discord.abc.User, key: str, used: int) -> None:
-        super().__init__(cog, actor)
+    def __init__(
+        self, cog: Any, actor: discord.abc.User, key: str, used: int, *, unit: Any = None
+    ) -> None:
+        super().__init__(cog, actor, unit=unit)
         self.key = key
         self.used = used
 
@@ -544,7 +604,7 @@ class DeleteConfirmView(_Editable):
         await self.apply(interaction, edit, "Marked in development.", key)
 
     async def on_cancel(self, interaction: discord.Interaction) -> None:
-        view = ConfigEditorView(self.cog, self.actor, self.key)
+        view = ConfigEditorView(self.cog, self.actor, self.key, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
 
@@ -553,13 +613,16 @@ class NameModal(discord.ui.Modal):
 
     value = discord.ui.TextInput(label="Badge name", max_length=100, placeholder="Combat Engineer")
 
-    def __init__(self, cog: Any, actor: discord.abc.User, *, key: str | None) -> None:
+    def __init__(
+        self, cog: Any, actor: discord.abc.User, *, key: str | None, unit: Any = None
+    ) -> None:
         super().__init__(title="Add a badge" if key is None else "Rename badge")
         self.cog = cog
+        self.unit = unit if unit is not None else cog.units.require(cog.units.primary)
         self.actor = actor
         self.key = key
         if key is not None:
-            badge = cog.catalogue.get(key)
+            badge = self.unit.catalogue.get(key)
             if badge is not None:
                 self.value.default = badge.name
 
@@ -567,7 +630,7 @@ class NameModal(discord.ui.Modal):
         name = str(self.value).strip()
 
         if self.key is None:
-            new_key = self.cog.catalogue.key_for(name)
+            new_key = self.unit.catalogue.key_for(name)
 
             def create(doc):
                 doc["badges"].append(
@@ -581,9 +644,14 @@ class NameModal(discord.ui.Modal):
                 )
 
             try:
-                self.cog.apply_catalogue_edit(create)
+                self.cog.apply_catalogue_edit(self.unit, create)
             except CatalogueError as error:
-                view = ConfigRootView(self.cog, self.actor, f"\N{WARNING SIGN} {error}")
+                view = ConfigRootView(
+                    self.cog,
+                    self.actor,
+                    f"\N{WARNING SIGN} {error}",
+                    unit=self.unit,
+                )
             else:
                 view = ConfigEditorView(
                     self.cog,
@@ -595,9 +663,9 @@ class NameModal(discord.ui.Modal):
             return
 
         key = self.key
-        previous = self.cog.catalogue.get(key).name
+        previous = self.unit.catalogue.get(key).name
         if name == previous:
-            view = ConfigEditorView(self.cog, self.actor, key)
+            view = ConfigEditorView(self.cog, self.actor, key, unit=self.unit)
             await interaction.response.edit_message(content=view.content(), view=view)
             return
 
@@ -611,9 +679,15 @@ class NameModal(discord.ui.Modal):
             entry["name"] = name
 
         try:
-            self.cog.apply_catalogue_edit(rename)
+            self.cog.apply_catalogue_edit(self.unit, rename)
         except CatalogueError as error:
-            view = ConfigEditorView(self.cog, self.actor, key, f"\N{WARNING SIGN} {error}")
+            view = ConfigEditorView(
+                self.cog,
+                self.actor,
+                key,
+                f"\N{WARNING SIGN} {error}",
+                unit=self.unit,
+            )
         else:
             view = ConfigEditorView(
                 self.cog, self.actor, key, f"Renamed from **{previous}**, old name kept for history."
@@ -629,12 +703,15 @@ class VariantsModal(discord.ui.Modal, title="Variants"):
         placeholder="Rifle, Pistol, SMG",
     )
 
-    def __init__(self, cog: Any, actor: discord.abc.User, key: str) -> None:
+    def __init__(
+        self, cog: Any, actor: discord.abc.User, key: str, *, unit: Any = None
+    ) -> None:
+        self.unit = unit if unit is not None else cog.units.require(cog.units.primary)
         super().__init__()
         self.cog = cog
         self.actor = actor
         self.key = key
-        badge = cog.catalogue.get(key)
+        badge = self.unit.catalogue.get(key)
         if badge is not None and badge.variants:
             self.value.default = ", ".join(badge.variants)
 
@@ -650,10 +727,16 @@ class VariantsModal(discord.ui.Modal, title="Variants"):
                 entry.pop("variants", None)
 
         try:
-            self.cog.apply_catalogue_edit(edit)
+            self.cog.apply_catalogue_edit(self.unit, edit)
         except CatalogueError as error:
-            view = ConfigEditorView(self.cog, self.actor, key, f"\N{WARNING SIGN} {error}")
+            view = ConfigEditorView(
+                self.cog,
+                self.actor,
+                key,
+                f"\N{WARNING SIGN} {error}",
+                unit=self.unit,
+            )
         else:
             notice = f"Variants set to {', '.join(items)}." if items else "Variants cleared."
-            view = ConfigEditorView(self.cog, self.actor, key, notice)
+            view = ConfigEditorView(self.cog, self.actor, key, notice, unit=self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
