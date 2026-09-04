@@ -1,5 +1,5 @@
 {
-  "_comment": "Source of truth for the badge catalogue. Edit here and the picker, queue embeds and catalogue output all follow. 'formerNames' keeps old records resolvable after a rename.",
+  "_comment": "1st Battalion's badge catalogue. Started as a copy of 2nd Battalion's and diverges from here — the two are edited independently, and /badge config only ever touches the one belonging to the unit the session started in.",
   "_badgeTypes": {
     "tab": "levels: [] — no levels at all (Airborne, Radio, JTAC).",
     "graded": "levels: [...] — the member picks every level they need run, and the instructor runs them in one session.",
@@ -92,7 +92,7 @@
     {
       "key": "cqc",
       "name": "CQC",
-      "category": "infantry",
+      "category": "support",
       "levels": [
         "B",
         "A",
@@ -114,7 +114,7 @@
     {
       "key": "support_w",
       "name": "Support Weapons",
-      "category": "infantry",
+      "category": "support",
       "levels": [
         "B",
         "A",
@@ -135,13 +135,9 @@
     {
       "key": "scouting",
       "name": "Scouting",
-      "category": "support",
+      "category": "infantry",
       "levels": [
         "B",
-        "A",
-        "E"
-      ],
-      "wipLevels": [
         "A",
         "E"
       ]
@@ -167,9 +163,7 @@
       "formerNames": [
         "Explosive Ordnance"
       ],
-      "wipLevels": [
-        "E"
-      ]
+      "wip": true
     },
     {
       "key": "indirect",
@@ -177,10 +171,6 @@
       "category": "support",
       "levels": [
         "B",
-        "A",
-        "E"
-      ],
-      "wipLevels": [
         "A",
         "E"
       ]
@@ -204,9 +194,6 @@
         "B",
         "A",
         "E"
-      ],
-      "extraTrainers": [
-        "<@189362064995778560>"
       ]
     },
     {
@@ -217,9 +204,6 @@
         "B",
         "A",
         "E"
-      ],
-      "extraTrainers": [
-        "<@189362064995778560>"
       ]
     },
     {

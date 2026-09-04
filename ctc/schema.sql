@@ -2,6 +2,9 @@
 --
 -- One row per badge, never per submission and never per level.
 --
+-- `unit` is the battalion. Several share one Discord server, so `guild_id` is
+-- identical across all of them and cannot separate the queues.
+--
 -- A member asking for three badges creates three rows sharing a group_id,
 -- because each is claimed by a different instructor and finishes on a
 -- different day. But the levels *within* one badge stay on a single row:
@@ -19,6 +22,7 @@ CREATE TABLE IF NOT EXISTS `ctc_requests` (
   `id`               INTEGER PRIMARY KEY AUTOINCREMENT,
   `group_id`         TEXT    NOT NULL,
   `guild_id`         TEXT    NOT NULL,
+  `unit`             TEXT    NOT NULL DEFAULT 'default',
   `member_id`        TEXT    NOT NULL,
   `member_name`      TEXT    NOT NULL,
   `badge_key`        TEXT    NOT NULL,
@@ -38,6 +42,7 @@ CREATE TABLE IF NOT EXISTS `ctc_requests` (
   `awarded_at`       TEXT,
   `cancelled_at`     TEXT,
   `last_nudged_at`   TEXT,
+  `bump_message_id`  TEXT,
   `amended_at`       TEXT,
   `amended_by`       TEXT,
   `amended_by_name`  TEXT
@@ -49,10 +54,12 @@ CREATE TABLE IF NOT EXISTS `ctc_requests` (
 CREATE TABLE IF NOT EXISTS `ctc_panels` (
   `message_id`     TEXT PRIMARY KEY,
   `channel_id`     TEXT NOT NULL,
+  `unit`           TEXT NOT NULL DEFAULT 'default',
   `with_catalogue` INTEGER NOT NULL DEFAULT 1,
   `posted_at`      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE INDEX IF NOT EXISTS `idx_ctc_requests_unit`    ON `ctc_requests` (`unit`);
 CREATE INDEX IF NOT EXISTS `idx_ctc_requests_status`  ON `ctc_requests` (`status`);
 CREATE INDEX IF NOT EXISTS `idx_ctc_requests_member`  ON `ctc_requests` (`member_id`);
 CREATE INDEX IF NOT EXISTS `idx_ctc_requests_group`   ON `ctc_requests` (`group_id`);

@@ -30,6 +30,11 @@ MAX_SELECT_OPTIONS = 25
 
 _KEY_RE = re.compile(r"^[a-z0-9_]+$")
 
+#: A Discord mention: ``<@user>``, ``<@!user>`` or ``<@&role>``. Stored as the
+#: literal mention rather than a bare id so a badge can name either a person or
+#: a role without a second field saying which.
+_MENTION_RE = re.compile(r"^<@[!&]?\d{15,25}>$")
+
 
 class CatalogueError(Exception):
     """Raised when a catalogue document would not produce a usable catalogue."""
@@ -40,7 +45,7 @@ class Badge:
 
     __slots__ = (
         "key", "name", "category", "levels", "timed", "wip", "wip_levels",
-        "variants", "former_names",
+        "variants", "former_names", "extra_trainers",
     )
 
     def __init__(self, raw: dict[str, Any]) -> None:
@@ -55,6 +60,10 @@ class Badge:
         self.wip_levels: list[str] = list(raw.get("wipLevels") or [])
         self.variants: list[str] = list(raw.get("variants") or [])
         self.former_names: list[str] = list(raw.get("formerNames") or [])
+        #: People or roles pinged alongside the instructor roles for this badge
+        #: specifically, because not every badge can be run by every
+        #: instructor. Stored as literal Discord mentions.
+        self.extra_trainers: list[str] = list(raw.get("extraTrainers") or [])
 
     @property
     def has_levels(self) -> bool:
@@ -125,6 +134,17 @@ class Catalogue:
                 )
             if len(badge.variants) > MAX_SELECT_OPTIONS:
                 raise CatalogueError(f"Badge {badge.key} has more than 25 variants")
+            if len(badge.extra_trainers) > MAX_SELECT_OPTIONS:
+                raise CatalogueError(
+                    f"Badge {badge.key} has more than 25 extra trainers"
+                )
+            bad = [m for m in badge.extra_trainers if not _MENTION_RE.match(m)]
+            if bad:
+                raise CatalogueError(
+                    f"Badge {badge.key} has extraTrainers entries that are not "
+                    f'Discord mentions: {", ".join(bad)}. Use "<@123…>" for a '
+                    'person or "<@&123…>" for a role.'
+                )
             by_key[badge.key] = badge
 
         requestable = [b for b in by_key.values() if not b.wip]
@@ -169,6 +189,11 @@ class Catalogue:
     def variants(self, badge_key: str) -> list[str]:
         badge = self.get(badge_key)
         return list(badge.variants) if badge else []
+
+    def extra_trainers(self, badge_key: str) -> list[str]:
+        """Mentions to add to this badge's opening ping, if any."""
+        badge = self.get(badge_key)
+        return list(badge.extra_trainers) if badge else []
 
     def resolve_by_name(self, name: str) -> Badge | None:
         """Resolve by current name or any former name, for reading historic rows."""

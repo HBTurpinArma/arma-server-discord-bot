@@ -204,7 +204,9 @@ def ticket_embed(cat: Catalogue, row: Any) -> discord.Embed:
 
 #: Ticket actions, named explicitly in the template. A loose ``[a-z]+`` would
 #: swallow any other ``ctc:*:*`` custom_id — the panel button did exactly that.
-TICKET_ACTIONS = ("claim", "cancel", "release", "complete", "result", "award", "reopen")
+TICKET_ACTIONS = (
+    "claim", "cancel", "release", "complete", "result", "award", "reopen", "assign",
+)
 
 
 class TicketButton(
@@ -251,7 +253,11 @@ class TicketButton(
 
 
 def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> discord.ui.View:
-    """Buttons appropriate to the ticket's current state."""
+    """Buttons appropriate to the ticket's current state.
+
+    Every button is shown to everyone, as Discord has no per-viewer components;
+    who may press what is enforced when it is pressed.
+    """
     view = discord.ui.View(timeout=None)
     rid = int(row["id"])
     status = row["status"]
@@ -266,6 +272,7 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
             )
         )
         view.add_item(TicketButton("cancel", rid, label="Cancel"))
+        view.add_item(TicketButton("assign", rid, label="Assign…"))
 
     elif status == "claimed":
         # A badge with variants always goes through the form — there is no
@@ -290,6 +297,7 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
                     TicketButton("result", rid, label="Partial", emoji="\N{WARNING SIGN}")
                 )
         view.add_item(TicketButton("release", rid, label="Release"))
+        view.add_item(TicketButton("assign", rid, label="Reassign…"))
         view.add_item(TicketButton("cancel", rid, label="Cancel", style=discord.ButtonStyle.danger))
 
     elif status == "completed":
@@ -310,6 +318,84 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
         view.add_item(TicketButton("reopen", rid, label="Reopen"))
 
     return view
+
+
+
+class AssignView(discord.ui.View):
+    """Pick who is working on a request.
+
+    Ephemeral and short-lived: it is opened from the ticket, used once, and
+    thrown away, so it needs no persistent custom_id.
+    """
+
+    def __init__(self, cog: Any, row: Any) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.row = row
+        self.unit = cog.unit_of(row)
+        current = row["instructor_id"]
+        self.add_item(
+            _AssignSelect(
+                self,
+                default=[
+                    discord.SelectDefaultValue(
+                        id=int(current), type=discord.SelectDefaultValueType.user
+                    )
+                ]
+                if current
+                else [],
+            )
+        )
+
+
+class _AssignSelect(discord.ui.UserSelect):
+    def __init__(self, parent: AssignView, default: list) -> None:
+        super().__init__(
+            placeholder="Who is running this test?",
+            min_values=1,
+            max_values=1,
+            default_values=default,
+        )
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.cog.assign_request(
+            interaction, self.parent_view.row, self.values[0]
+        )
+
+
+
+class UnitPickerView(discord.ui.View):
+    """Which battalion? Shown only when nothing else could work it out.
+
+    Ephemeral and one-shot, so it needs no persistent custom_id. Better than an
+    error: the member is one click from the thing they asked for, instead of
+    having to rerun the command with an option they did not know existed.
+    """
+
+    def __init__(self, cog: Any, member: discord.abc.User, on_pick: Any) -> None:
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.member = member
+        self.on_pick = on_pick
+        for unit in cog.units:
+            self.add_item(_UnitButton(self, unit))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.member.id
+
+    def content(self) -> str:
+        return "Which battalion is this for?"
+
+
+class _UnitButton(discord.ui.Button):
+    def __init__(self, parent: UnitPickerView, unit: Any) -> None:
+        super().__init__(label=unit.name, style=discord.ButtonStyle.primary)
+        self.parent_view = parent
+        self.unit = unit
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.on_pick(interaction, self.unit)
 
 
 # --------------------------------------------------------- request flow
@@ -340,12 +426,13 @@ class NotesModal(discord.ui.Modal, title="Add notes"):
 class BadgePickerView(discord.ui.View):
     """Step one — choose badges. Edits itself into the level step."""
 
-    def __init__(self, cog: Any, member: discord.abc.User) -> None:
+    def __init__(self, cog: Any, member: discord.abc.User, unit: Any) -> None:
+        self.unit = unit
         super().__init__(timeout=900)
         self.cog = cog
         self.member = member
 
-        cat: Catalogue = cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         offered = cat.requestable()
         limit = min(MAX_BADGES_PER_REQUEST, len(offered))
 
@@ -377,7 +464,7 @@ class BadgePickerView(discord.ui.View):
         self.add_item(self.select)
 
     def content(self) -> str:
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         hidden = len(cat.all()) - len(cat.requestable())
         limit = min(MAX_BADGES_PER_REQUEST, len(cat.requestable()))
         lines = [
@@ -396,7 +483,7 @@ class BadgePickerView(discord.ui.View):
         return interaction.user.id == self.member.id
 
     async def on_pick(self, interaction: discord.Interaction) -> None:
-        view = LevelView(self.cog, self.member, list(self.select.values))
+        view = LevelView(self.cog, self.member, list(self.select.values), self.unit)
         await interaction.response.edit_message(content=view.content(), view=view)
 
 
@@ -424,7 +511,7 @@ class LevelSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        cat: Catalogue = self.parent_view.cog.catalogue
+        cat: Catalogue = self.parent_view.unit.catalogue
         self.parent_view.levels[self.badge_key] = cat.sort_levels(self.badge_key, self.values)
         await self.parent_view.refresh(interaction)
 
@@ -432,7 +519,10 @@ class LevelSelect(discord.ui.Select):
 class LevelView(discord.ui.View):
     """Step two — set levels for the graded badges, then submit."""
 
-    def __init__(self, cog: Any, member: discord.abc.User, badge_keys: Sequence[str]) -> None:
+    def __init__(
+        self, cog: Any, member: discord.abc.User, badge_keys: Sequence[str], unit: Any
+    ) -> None:
+        self.unit = unit
         super().__init__(timeout=900)
         self.cog = cog
         self.member = member
@@ -446,7 +536,7 @@ class LevelView(discord.ui.View):
     # have their level decided by the result rather than chosen up front.
     @property
     def _graded(self) -> list[Badge]:
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         return [b for b in (cat.get(k) for k in self.badge_keys) if b and b.needs_level_choice]
 
     @property
@@ -455,7 +545,7 @@ class LevelView(discord.ui.View):
 
     def rebuild(self) -> None:
         self.clear_items()
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         self.page = min(self.page, self._pages - 1)
         window = self._graded[self.page * LEVELS_PER_PAGE : (self.page + 1) * LEVELS_PER_PAGE]
 
@@ -502,7 +592,7 @@ class LevelView(discord.ui.View):
         return callback
 
     def content(self) -> str:
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         chosen = [cat.get(k) for k in self.badge_keys]
         graded = self._graded
 
@@ -592,7 +682,7 @@ class _VariantSelect(discord.ui.Select):
 class _ResultLevelSelect(discord.ui.Select):
     def __init__(self, parent: ResultView, options: Sequence[str], *, single: bool) -> None:
         self.parent_view = parent
-        cat: Catalogue = parent.cog.catalogue
+        cat: Catalogue = parent.unit.catalogue
         super().__init__(
             placeholder="Level earned" if single else "Levels passed",
             min_values=0,
@@ -607,7 +697,7 @@ class _ResultLevelSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        cat: Catalogue = self.parent_view.cog.catalogue
+        cat: Catalogue = self.parent_view.unit.catalogue
         self.parent_view.levels = cat.sort_levels(self.parent_view.badge_key, self.values)
         await self.parent_view.refresh(interaction)
 
@@ -621,13 +711,14 @@ class ResultView(discord.ui.View):
 
     def __init__(self, cog: Any, row: Any, instructor: discord.abc.User) -> None:
         super().__init__(timeout=600)
+        self.unit = cog.unit_of(row)
         self.cog = cog
         self.row = row
         self.instructor = instructor
         self.request_id = int(row["id"])
         self.badge_key = row["badge_key"]
         self.variant: str | None = None
-        cat: Catalogue = cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         badge = cat.get(self.badge_key)
         self.timed = bool(badge and badge.timed)
         # A timed test starts blank; a graded one starts from what was requested.
@@ -636,7 +727,7 @@ class ResultView(discord.ui.View):
 
     def rebuild(self) -> None:
         self.clear_items()
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         variants = cat.variants(self.badge_key)
         if variants:
             self.add_item(_VariantSelect(self, variants))
@@ -660,7 +751,7 @@ class ResultView(discord.ui.View):
         self.add_item(cancel)
 
     def content(self) -> str:
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         badge = cat.get(self.badge_key)
         variants = cat.variants(self.badge_key)
         parts = [f"**{badge.name if badge else self.badge_key}** — request #{self.request_id}"]
@@ -709,7 +800,7 @@ class _AmendLevelSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        cat: Catalogue = self.parent_view.cog.catalogue
+        cat: Catalogue = self.parent_view.unit.catalogue
         self.parent_view.levels = cat.sort_levels(self.parent_view.badge_key, self.values)
         await self.parent_view.refresh(interaction)
 
@@ -723,12 +814,13 @@ class AmendView(discord.ui.View):
 
     def __init__(self, cog: Any, row: Any, instructor: discord.abc.User) -> None:
         super().__init__(timeout=600)
+        self.unit = cog.unit_of(row)
         self.cog = cog
         self.row = row
         self.instructor = instructor
         self.request_id = int(row["id"])
         self.badge_key = row["badge_key"]
-        self.original = cog.catalogue.parse_levels(self.badge_key, row["levels"])
+        self.original = self.unit.catalogue.parse_levels(self.badge_key, row["levels"])
         self.levels = list(self.original)
         self.finished = row["status"] in ("completed", "awarded")
         self.rebuild()
@@ -744,7 +836,7 @@ class AmendView(discord.ui.View):
             self.add_item(cancel)
             return
 
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         badge = cat.get(self.badge_key)
         if badge is not None:
             # The full ladder, not just what was asked for — the common case is
@@ -765,7 +857,7 @@ class AmendView(discord.ui.View):
         self.add_item(cancel)
 
     def content(self) -> str:
-        cat: Catalogue = self.cog.catalogue
+        cat: Catalogue = self.unit.catalogue
         badge = cat.get(self.badge_key)
         name = badge.name if badge else self.badge_key
 
@@ -812,39 +904,84 @@ class AmendView(discord.ui.View):
 
 #: Fixed id, deliberately not matching the ticket template above. Registered
 #: with bot.add_view in cog_load so the pinned panel survives restarts.
-PANEL_CUSTOM_ID = "ctc:panel:open"
+#: What a panel posted before battalions existed carries. It still has to
+#: resolve, or every pinned panel in the server goes dead on upgrade — it maps
+#: to the primary unit.
+LEGACY_PANEL_UNIT = "open"
+
+PANEL_CUSTOM_ID = f"ctc:panel:{LEGACY_PANEL_UNIT}"
 
 
-class PanelView(discord.ui.View):
-    """The pinnable panel. One button, alive forever."""
+class PanelButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"ctc:panel:(?P<unit>[a-z0-9_]+)",
+):
+    """The pinnable panel button, tagged with the battalion it belongs to.
 
-    def __init__(self) -> None:
-        super().__init__(timeout=None)
+    Dynamic rather than a fixed custom_id because one server can pin a panel
+    per battalion, and a shared id would mean both opened the same badge list.
 
-    @discord.ui.button(
-        label="Request a Badge",
-        style=discord.ButtonStyle.primary,
-        emoji="\N{MILITARY MEDAL}",
-        custom_id=PANEL_CUSTOM_ID,
-    )
-    async def request(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+    The unit is deliberately not digits, so this cannot be confused with a
+    ticket button — those are ``ctc:<action>:<request id>`` and match only an
+    explicit list of actions.
+    """
+
+    def __init__(self, unit: str) -> None:
+        self.unit = unit
+        super().__init__(
+            discord.ui.Button(
+                label="Request a Badge",
+                style=discord.ButtonStyle.primary,
+                emoji="🎖",
+                custom_id=f"ctc:panel:{unit}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):  # noqa: ANN001
+        return cls(match["unit"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
         cog = interaction.client.get_cog("ctc")
         if cog is None:  # pragma: no cover - only if the cog is unloaded
             await interaction.response.send_message("Badge system is offline.", ephemeral=True)
             return
-        picker = BadgePickerView(cog, interaction.user)
+        unit = cog.units.get(self.unit) or cog.units.require(cog.units.primary)
+        # Same gate as the slash command — otherwise the panel is a way around it.
+        if not cog.can_request(unit, interaction.user):
+            await interaction.response.send_message(
+                f"Badge requests for {unit.name} are open to its members only.",
+                ephemeral=True,
+            )
+            return
+        picker = BadgePickerView(cog, interaction.user, unit)
         await interaction.response.send_message(picker.content(), view=picker, ephemeral=True)
 
 
-def entry_point_payload(cat: Catalogue, *, with_catalogue: bool) -> dict[str, Any]:
-    """The pinnable panel. Members click rather than remembering a command."""
+def panel_view(unit: str) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(PanelButton(unit))
+    return view
+
+
+def entry_point_payload(
+    cat: Catalogue, *, with_catalogue: bool, unit: str, unit_name: str | None = None
+) -> dict[str, Any]:
+    """The pinnable panel. Members click rather than remembering a command.
+
+    Carries its unit so a server running several battalions can pin one panel
+    each, and clicking the wrong one is impossible rather than merely unlikely.
+    """
+    heading = "\N{MILITARY MEDAL} Badge Requests"
+    if unit_name:
+        heading += f" \N{EM DASH} {unit_name}"
     panel = discord.Embed(
         colour=COLOUR,
-        title="\N{MILITARY MEDAL} Badge Requests",
+        title=heading,
         description=(
             "Click below to request training for one or more badges.\n"
             "You can also use `/badge request` anywhere in the server."
         ),
     )
     embeds = [catalogue_embed(cat), panel] if with_catalogue else [panel]
-    return {"embeds": embeds, "view": PanelView()}
+    return {"embeds": embeds, "view": panel_view(unit)}
