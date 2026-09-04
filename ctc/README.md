@@ -61,6 +61,7 @@ ability:
 | `instructor_role_id` | `0` | Claim/complete/award, and the queue and stats commands. **`0` means anyone**, for local testing only. |
 | `config_role_id` | `0` | Who may edit the catalogue. `0` falls back to the Manage Server permission. |
 | `assign_role_id` | `0` | Who may set who is working on a request. `0` falls back to the instructor roles. |
+| `member_role_id` | `0` | Who may raise a request with this unit. `0` means anyone. Staff can always request. |
 | `panel_role_id` | `0` | Who may post the request panel. `0` falls back to the Manage Server permission. |
 | `taw_award_url` | `""` | Deep link on completed tickets. Omitted if blank. |
 | `create_threads` | `true` | `false` posts cards in the channel instead. |
@@ -154,14 +155,30 @@ Resolved in order, stopping at the first that answers:
 1. the request thread the interaction is in — the row knows its own unit
 2. the queue channel it was run in, or that channel's parent
 3. the only configured unit, when there is just one
-4. the member's own roles, if they match **exactly one** unit
+4. the member's own **staff** roles — instructor, config or assign — if they
+   match exactly one unit
 
 Somebody who staffs both battalions matches neither at step 4, so they are
 asked to run the command in the right channel rather than being guessed at and
 silently filed under the wrong one.
 
+`member_role_id` is deliberately **not** used for routing. It says who may
+request, and a division-wide "member" role would match a battalion it has
+nothing to do with — silently filing the request under the wrong one. Failing
+to route asks the member a question; misrouting is invisible.
+
 Panels resolve without any of that: the button carries its unit in its
 custom_id, so a panel can only ever open its own battalion's badges.
+
+### Who may request
+
+Set `member_role_id` (one id or a list) and only holders may raise a request
+with that unit — plus its own staff, who can always request. Leave it unset and
+requesting is open to everyone, which is how a single-battalion server has
+always behaved.
+
+The pinned panel enforces the same check, so it cannot be used to get around
+it.
 
 ### Upgrading a single-battalion setup
 
@@ -360,7 +377,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-67 offline checks — catalogue validation, all three badge kinds, variants, the
+69 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 

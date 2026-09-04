@@ -60,6 +60,7 @@ DEFAULTS: dict[str, Any] = {
     "archive_on_award": True,
     "lock_on_award": False,
     "assign_role_id": 0,
+    "member_role_id": 0,
     "daily_bump": True,
     "nudge_unclaimed_hours": 48,
     "nudge_unawarded_hours": 72,
@@ -286,6 +287,17 @@ class CTC(commands.Cog, name="ctc"):
     def can_work_row(self, user: discord.abc.User, row: Any) -> bool:
         """As above, for a ticket that already knows its own battalion."""
         return self.can_work(self.unit_of(row), user, row["badge_key"])
+
+    def can_request(self, unit: Unit, user: discord.abc.User) -> bool:
+        """Who may raise a request with this battalion.
+
+        Unset means anyone, which is how a single-battalion server has always
+        behaved. Set it and only holders may ask — a member of one battalion
+        cannot book training with the other.
+        """
+        if not self.role_ids(unit, "member_role_id"):
+            return True
+        return self.holds_any(unit, user, "member_role_id") or self.is_instructor(unit, user)
 
     def can_assign(self, unit: Unit, user: discord.abc.User) -> bool:
         """Who may put someone else's name on a request.
@@ -569,6 +581,12 @@ class CTC(commands.Cog, name="ctc"):
     async def badge_request(self, interaction: discord.Interaction) -> None:
         unit = await self.resolve_unit(interaction)
         if unit is None:
+            return
+        if not self.can_request(unit, interaction.user):
+            await interaction.response.send_message(
+                f"Badge requests for {unit.name} are open to its members only.",
+                ephemeral=True,
+            )
             return
         view = BadgePickerView(self, interaction.user, unit)
         await interaction.response.send_message(view.content(), view=view, ephemeral=True)

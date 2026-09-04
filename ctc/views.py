@@ -913,6 +913,13 @@ class PanelButton(
             await interaction.response.send_message("Badge system is offline.", ephemeral=True)
             return
         unit = cog.units.get(self.unit) or cog.units.require(cog.units.primary)
+        # Same gate as the slash command — otherwise the panel is a way around it.
+        if not cog.can_request(unit, interaction.user):
+            await interaction.response.send_message(
+                f"Badge requests for {unit.name} are open to its members only.",
+                ephemeral=True,
+            )
+            return
         picker = BadgePickerView(cog, interaction.user, unit)
         await interaction.response.send_message(picker.content(), view=picker, ephemeral=True)
 

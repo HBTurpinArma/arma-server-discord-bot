@@ -177,9 +177,14 @@ class Units:
 #: before units existed are backfilled to.
 DEFAULT_UNIT_KEY = "default"
 
-#: Settings naming roles that mean "this person belongs to this unit".
+#: Settings naming roles that identify a person as *staff* of this unit, used
+#: to work out which battalion a loose command is about.
+#:
+#: `member_role_id` is deliberately absent. It says who may request, and a
+#: division-wide "member" role would match a unit it has nothing to do with —
+#: which would file the request under the wrong battalion silently. Failing to
+#: route is visible and recoverable; misrouting is neither.
 _MEMBERSHIP_SETTINGS = (
-    "member_role_id",
     "instructor_role_id",
     "config_role_id",
     "assign_role_id",

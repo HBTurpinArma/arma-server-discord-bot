@@ -1478,6 +1478,60 @@ def _() -> None:
     )
 
 
+
+@check("member roles gate who may request, and are kept out of routing")
+def _() -> None:
+    from cogs.ctc import CTC
+
+    TI, TS, MEMBER, OTHER = 10, 20, 30, 40
+
+    cog = CTC.__new__(CTC)
+    cog.units = Units(
+        {
+            "primary_unit": "a",
+            "units": {
+                "a": {
+                    "catalogue": "catalogue.json",
+                    "instructor_role_id": [TI, TS],
+                    "member_role_id": [MEMBER],
+                },
+                "b": {"catalogue": "catalogue.json", "instructor_role_id": [OTHER]},
+            },
+        },
+        DEFAULTS,
+    )
+    a, b = cog.units.require("a"), cog.units.require("b")
+
+    assert cog.can_request(a, FakeMember(1, [MEMBER])), "a member may request"
+    assert cog.can_request(a, FakeMember(2, [TI])), "staff may request without the member role"
+    assert not cog.can_request(a, FakeMember(3, [OTHER])), "the other battalion may not"
+    assert not cog.can_request(a, FakeMember(4)), "nobody with no roles"
+
+    # Unset means anyone, which is how a single-battalion server has behaved.
+    assert cog.can_request(b, FakeMember(5)), "no member_role_id means open"
+
+    # A member role must never decide which battalion a loose command is about:
+    # a division-wide member role would silently misfile the request.
+    assert cog.units.for_member(FakeMember(6, [MEMBER])) is None, (
+        "member roles must not drive routing"
+    )
+    assert cog.units.for_member(FakeMember(7, [TI])).key == "a", "staff roles still route"
+
+
+@check("the panel is gated the same way as the command")
+def _() -> None:
+    # Otherwise the pinned panel is a way straight past the member check.
+    src = (ROOT / "views.py").read_text(encoding="utf-8")
+    panel = src[src.index("class PanelButton"):src.index("def panel_view")]
+    assert "cog.can_request(unit, interaction.user)" in panel, "panel must check can_request"
+
+    cog_src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    request = cog_src[
+        cog_src.index("async def badge_request") : cog_src.index("async def badge_catalogue")
+    ]
+    assert "self.can_request(unit, interaction.user)" in request
+
+
 def main() -> int:
     passed = 0
     total = 0
