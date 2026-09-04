@@ -91,7 +91,7 @@
     {
       "key": "cqc",
       "name": "CQC",
-      "category": "support",
+      "category": "infantry",
       "levels": [
         "B",
         "A",
@@ -113,7 +113,7 @@
     {
       "key": "support_w",
       "name": "Support Weapons",
-      "category": "support",
+      "category": "infantry",
       "levels": [
         "B",
         "A",
@@ -134,9 +134,13 @@
     {
       "key": "scouting",
       "name": "Scouting",
-      "category": "infantry",
+      "category": "support",
       "levels": [
         "B",
+        "A",
+        "E"
+      ],
+      "wipLevels": [
         "A",
         "E"
       ]
@@ -162,7 +166,9 @@
       "formerNames": [
         "Explosive Ordnance"
       ],
-      "wip": true
+      "wipLevels": [
+        "E"
+      ]
     },
     {
       "key": "indirect",
@@ -170,6 +176,10 @@
       "category": "support",
       "levels": [
         "B",
+        "A",
+        "E"
+      ],
+      "wipLevels": [
         "A",
         "E"
       ]

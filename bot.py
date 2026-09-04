@@ -127,7 +127,7 @@ class DiscordBot(commands.Bot):
         super().__init__(
             command_prefix=commands.when_mentioned_or(config["prefix"]),
             intents=intents,
-            help_command=None,
+            help_command=None,   
         )
         """
         This creates custom bot variables so that we can access these variables in cogs more easily.
