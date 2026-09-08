@@ -1,5 +1,5 @@
 {
-  "_comment": "1st Battalion's badge catalogue. A subset of 2nd Battalion's: AM1 runs Rifleman and Machine Gunner as Gun Range variants, AT under Support Weapons, and SL/FTL under Leadership. The two files are edited independently and diverge from here.",
+  "_comment": "1st Battalion's badge catalogue. Starts as a subset of 2nd Battalion's: AM1 runs Rifleman and Machine Gunner as Gun Range variants, AT under Support Weapons, and SL/FTL under Leadership. Every category is kept, even empty ones, so /badge config can add any badge AM2 has -- the editor only offers categories this file defines. The two files are edited independently.",
   "_badgeTypes": {
     "tab": "levels: [] — no levels at all (Airborne, Radio, JTAC).",
     "graded": "levels: [...] — the member picks every level they need run, and the instructor runs them in one session.",
@@ -9,6 +9,11 @@
   "_variants": "variants: [...] — a badge run in several forms (e.g. Gun Range by weapon). The instructor picks which one was run when recording the result. Max 25.",
   "_extraTrainers": "extraTrainers: [\"<@123…>\"] — people or roles pinged alongside the instructor roles for that badge only, for badges not every instructor can run. Use <@id> for a person, <@&id> for a role.",
   "categories": [
+    {
+      "key": "tabs",
+      "name": "Tabs",
+      "emoji": "<:ctc_tabs:1533522921908207686>"
+    },
     {
       "key": "infantry",
       "name": "Gun Range",
@@ -23,6 +28,11 @@
       "key": "vehicles",
       "name": "Vehicles",
       "emoji": "<:ctc_vehicles:1533523069396848651>"
+    },
+    {
+      "key": "air",
+      "name": "Air",
+      "emoji": "✈️"
     },
     {
       "key": "command",
