@@ -1687,6 +1687,23 @@ def _() -> None:
         assert units.find(text) is None, text
 
 
+
+@check("the catalogue names its battalion when there is more than one")
+def _() -> None:
+    named = catalogue_embed(CAT, "", "2nd Battalion")
+    assert named.title.endswith("2nd Battalion"), named.title
+
+    # A single-battalion server has nothing to disambiguate, so no suffix.
+    assert catalogue_embed(CAT).title == catalogue_embed(CAT, "").title
+    assert "Battalion" not in catalogue_embed(CAT).title
+
+    # The panel's two embeds agree with each other.
+    embeds = entry_point_payload(
+        CAT, with_catalogue=True, unit="am2", unit_name="2nd Battalion"
+    )["embeds"]
+    assert all(e.title.endswith("2nd Battalion") for e in embeds), [e.title for e in embeds]
+
+
 def main() -> int:
     passed = 0
     total = 0

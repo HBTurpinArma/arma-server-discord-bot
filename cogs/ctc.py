@@ -655,7 +655,11 @@ class CTC(commands.Cog, name="ctc"):
         if unit is None:
             return
         await interaction.response.send_message(
-            embed=catalogue_embed(unit.catalogue, unit.settings["site_url"]),
+            embed=catalogue_embed(
+                unit.catalogue,
+                unit.settings["site_url"],
+                unit.name if len(self.units) > 1 else None,
+            ),
             ephemeral=True,
         )
 
