@@ -362,9 +362,9 @@ class CTC(commands.Cog, name="ctc"):
         genuinely ambiguous, so they are asked rather than guessed at.
         """
         if chosen:
-            unit = self.units.get(chosen)
+            unit = self.units.find(chosen)
             if unit is None and not quiet:
-                names = ", ".join(f"`{u.key}`" for u in self.units)
+                names = ", ".join(f"**{u.name}** (`{u.key}`)" for u in self.units)
                 await interaction.response.send_message(
                     f'There is no battalion called "{chosen}". Pick one of {names}.',
                     ephemeral=True,

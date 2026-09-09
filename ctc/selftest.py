@@ -1656,6 +1656,37 @@ def _() -> None:
     assert shared.require("am1").settings["site_url"] == "http://x:6001"
 
 
+
+@check("a battalion can be named by key or by the name shown on screen")
+def _() -> None:
+    units = Units(
+        {
+            "primary_unit": "am2",
+            "units": {
+                "am2": {"name": "2nd Battalion", "catalogue": "catalogue.json"},
+                "am1": {"name": "1st Battalion", "catalogue": "am1.json"},
+            },
+        },
+        DEFAULTS,
+    )
+    # The autocomplete displays the name and sends the key, so a member who
+    # selects a suggestion sends "am2" and one who just types what they read
+    # sends "2nd Battalion". Both have to work.
+    for text, expected in [
+        ("am2", "am2"),
+        ("AM2", "am2"),
+        ("2nd Battalion", "am2"),
+        ("2ND BATTALION", "am2"),
+        (" am1 ", "am1"),
+        ("1st Battalion", "am1"),
+    ]:
+        found = units.find(text)
+        assert found is not None and found.key == expected, f"{text!r} -> {found}"
+
+    for text in ("3rd Battalion", "", None, "battalion"):
+        assert units.find(text) is None, text
+
+
 def main() -> int:
     passed = 0
     total = 0

@@ -134,6 +134,22 @@ class Units:
     def get(self, key: str | None) -> Unit | None:
         return self._by_key.get(key) if key else None
 
+    def find(self, text: str | None) -> Unit | None:
+        """A unit by key or by display name, case-insensitively.
+
+        The autocomplete shows names but sends keys, so a member who selects a
+        suggestion sends "am2" — but one who types "2nd Battalion" and presses
+        enter without selecting sends exactly what they read on screen.
+        Refusing that is a trap of our own making.
+        """
+        if not text:
+            return None
+        needle = text.strip().casefold()
+        for unit in self._by_key.values():
+            if needle in (unit.key.casefold(), unit.name.casefold()):
+                return unit
+        return None
+
     def require(self, key: str | None) -> Unit:
         unit = self.get(key)
         if unit is None:
