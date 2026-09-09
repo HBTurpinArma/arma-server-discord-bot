@@ -63,6 +63,7 @@ DEFAULTS: dict[str, Any] = {
     "assign_role_id": 0,
     "member_role_id": 0,
     "site_url": "",
+    "manager_ids": [],
     "daily_bump": True,
     "nudge_unclaimed_hours": 48,
     "nudge_unawarded_hours": 72,
@@ -224,6 +225,11 @@ class CTC(commands.Cog, name="ctc"):
         self.bot.add_dynamic_items(PanelButton)
         self.nudge_loop.start()
         self.bump_loop.start()
+        # Settings a panel renders -- the site links, the battalion's name --
+        # only change in config.json, and nothing else would ever redraw a
+        # pinned panel for them. Refreshing once on startup means a restart is
+        # enough, rather than remembering to re-run /badge panel by hand.
+        self.bot.loop.create_task(self.refresh_panels_when_ready())
         for unit in self.units:
             self.bot.logger.info(
                 f"CTC[{unit.key}]: {len(unit.catalogue.all())} badges loaded, "
@@ -277,7 +283,32 @@ class CTC(commands.Cog, name="ctc"):
             and any(r.id in ids for r in user.roles)
         )
 
+    def manager_ids(self, unit: Unit) -> list[int]:
+        """People who staff every battalion without holding any battalion's roles.
+
+        For division-level staff who run the system itself: they need to
+        manage a unit they are deliberately not a member of, and inventing a
+        Discord role for that would put them in the unit's ping lists.
+
+        Accepts a bare id, a list of them, or pasted mentions.
+        """
+        value = unit.settings.get("manager_ids")
+        if not value:
+            return []
+        values = value if isinstance(value, (list, tuple)) else [value]
+        ids = []
+        for entry in values:
+            digits = "".join(c for c in str(entry) if c.isdigit())
+            if digits:
+                ids.append(int(digits))
+        return ids
+
+    def is_manager(self, unit: Unit, user: discord.abc.User) -> bool:
+        return user.id in self.manager_ids(unit)
+
     def is_instructor(self, unit: Unit, user: discord.abc.User) -> bool:
+        if self.is_manager(unit, user):
+            return True
         if not self.role_ids(unit, "instructor_role_id"):
             return True  # unset means "anyone", for local testing only
         return self.holds_any(unit, user, "instructor_role_id")
@@ -324,6 +355,8 @@ class CTC(commands.Cog, name="ctc"):
         ability exists out of the box and narrowing it to, say, Training
         Specialists is a deliberate choice rather than the default.
         """
+        if self.is_manager(unit, user):
+            return True
         if self.role_ids(unit, "assign_role_id"):
             return self.holds_any(unit, user, "assign_role_id")
         return self.is_instructor(unit, user)
@@ -334,6 +367,8 @@ class CTC(commands.Cog, name="ctc"):
         Falls back to the Manage Server permission when no role is set, so a
         partial config still leaves someone able to act.
         """
+        if self.is_manager(unit, user):
+            return True
         if self.role_ids(unit, setting):
             return self.holds_any(unit, user, setting)
         perms = getattr(user, "guild_permissions", None)
@@ -362,9 +397,9 @@ class CTC(commands.Cog, name="ctc"):
         genuinely ambiguous, so they are asked rather than guessed at.
         """
         if chosen:
-            unit = self.units.get(chosen)
+            unit = self.units.find(chosen)
             if unit is None and not quiet:
-                names = ", ".join(f"`{u.key}`" for u in self.units)
+                names = ", ".join(f"**{u.name}** (`{u.key}`)" for u in self.units)
                 await interaction.response.send_message(
                     f'There is no battalion called "{chosen}". Pick one of {names}.',
                     ephemeral=True,
@@ -655,7 +690,11 @@ class CTC(commands.Cog, name="ctc"):
         if unit is None:
             return
         await interaction.response.send_message(
-            embed=catalogue_embed(unit.catalogue, unit.settings["site_url"]),
+            embed=catalogue_embed(
+                unit.catalogue,
+                unit.settings["site_url"],
+                unit.name if len(self.units) > 1 else None,
+            ),
             ephemeral=True,
         )
 
@@ -888,6 +927,19 @@ class CTC(commands.Cog, name="ctc"):
         # unit's — the other battalion's badges did not change.
         self.bot.loop.create_task(self.refresh_panels(unit=unit.key))
         return unit.catalogue
+
+    async def refresh_panels_when_ready(self) -> None:
+        """Redraw every tracked panel once the gateway is up.
+
+        cog_load runs before the bot is connected, so fetching the channels
+        has to wait. Failures are logged and swallowed: a panel that cannot be
+        redrawn is stale, which is not a reason to take the cog down.
+        """
+        await self.bot.wait_until_ready()
+        try:
+            await self.refresh_panels()
+        except Exception:
+            self.bot.logger.exception("CTC: could not refresh panels on startup")
 
     async def refresh_panels(self, *, unit: str | None = None) -> None:
         """Re-render the catalogue in panels that embed one.

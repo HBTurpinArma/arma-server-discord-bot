@@ -62,6 +62,7 @@ ability:
 | `config_role_id` | `0` | Who may edit the catalogue. `0` falls back to the Manage Server permission. |
 | `assign_role_id` | `0` | Who may set who is working on a request. `0` falls back to the instructor roles. |
 | `member_role_id` | `0` | Who may raise a request with this unit. `0` means anyone. Staff can always request. |
+| `manager_ids` | `[]` | User ids who staff **every** battalion without holding its roles. Set once in the shared block. |
 | `site_url` | `""` | This battalion's website. Adds links to the catalogue, the panel and every ticket. Blank adds none. |
 | `panel_role_id` | `0` | Who may post the request panel. `0` falls back to the Manage Server permission. |
 | `taw_award_url` | `""` | Deep link on completed tickets. Omitted if blank. |
@@ -208,6 +209,24 @@ working too: their old `ctc:panel:open` id resolves to the primary unit.
 To split later, add the `units` block and set `primary_unit` to whichever key
 represents the battalion that was already running — that is where the history
 goes.
+
+### Division staff
+
+`manager_ids` names people who run the system rather than a battalion: they
+can claim, complete, award, assign, configure and post panels in **every**
+unit, without holding any unit's roles.
+
+```json
+"manager_ids": [1111111111111111111]
+```
+
+Set it in the shared block so it covers battalions added later. A bare id, a
+list, or pasted `<@id>` mentions all work.
+
+They deliberately stay out of routing. Holding no battalion roles means a
+loose `/badge request` asks which battalion rather than guessing, which is
+right: a manager belongs to none of them. Use the `unit` option or run the
+command in that battalion's channel.
 
 ### Links to the website
 
@@ -395,13 +414,16 @@ Panels posted by `/badge panel` are tracked in `ctc_panels`, and any that embed
 the catalogue are re-rendered whenever `/badge config` changes it, so a pinned
 panel cannot drift from the live list.
 
+Panels are also redrawn once on startup, so a settings change in
+`config.json` -- the site links, a battalion's name -- reaches them after a
+restart without re-running `/badge panel`.
+
 A panel posted before tracking existed is not in that table and will never
 refresh. Adopt it with `/badge panel message_id:<id>`, run in its channel: the
 message is rewritten in place and tracked from then on, so the pin survives.
 Right-click the panel and Copy Message ID to get the value. A panel that has been deleted is dropped
-from tracking the next time a refresh runs. Editing `catalogue.json` by hand and
-restarting does not trigger a refresh; re-run `/badge panel` or make any change
-through `/badge config`.
+from tracking the next time a refresh runs. Editing `catalogue.json` by hand is picked up by the startup refresh, so a
+restart is enough.
 
 ## Tests
 
@@ -409,7 +431,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-75 offline checks — catalogue validation, all three badge kinds, variants, the
+79 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 

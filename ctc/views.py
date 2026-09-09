@@ -67,9 +67,16 @@ def describe_kind(badge: Badge) -> str:
 # ----------------------------------------------------------------- embeds
 
 
-def catalogue_embed(cat: Catalogue, site_url: str = "") -> discord.Embed:
+def catalogue_embed(
+    cat: Catalogue, site_url: str = "", unit_name: str | None = None
+) -> discord.Embed:
     """The badge list, grouped by category. Shared by /badge catalogue and the panel."""
-    embed = discord.Embed(colour=COLOUR, title="\N{MILITARY MEDAL} Badge catalogue")
+    # Two battalions run different badge sets, so an unlabelled list is
+    # ambiguous the moment there is more than one of them.
+    heading = "\N{MILITARY MEDAL} Badge catalogue"
+    if unit_name:
+        heading += f" \N{EM DASH} {unit_name}"
+    embed = discord.Embed(colour=COLOUR, title=heading)
 
     grouped: dict[str, list[Badge]] = {}
     for badge in cat.all():
@@ -1017,5 +1024,7 @@ def entry_point_payload(
             else ""
         ),
     )
-    embeds = [catalogue_embed(cat, site_url), panel] if with_catalogue else [panel]
+    embeds = (
+        [catalogue_embed(cat, site_url, unit_name), panel] if with_catalogue else [panel]
+    )
     return {"embeds": embeds, "view": panel_view(unit)}
