@@ -225,6 +225,11 @@ class CTC(commands.Cog, name="ctc"):
         self.bot.add_dynamic_items(PanelButton)
         self.nudge_loop.start()
         self.bump_loop.start()
+        # Settings a panel renders -- the site links, the battalion's name --
+        # only change in config.json, and nothing else would ever redraw a
+        # pinned panel for them. Refreshing once on startup means a restart is
+        # enough, rather than remembering to re-run /badge panel by hand.
+        self.bot.loop.create_task(self.refresh_panels_when_ready())
         for unit in self.units:
             self.bot.logger.info(
                 f"CTC[{unit.key}]: {len(unit.catalogue.all())} badges loaded, "
@@ -922,6 +927,19 @@ class CTC(commands.Cog, name="ctc"):
         # unit's — the other battalion's badges did not change.
         self.bot.loop.create_task(self.refresh_panels(unit=unit.key))
         return unit.catalogue
+
+    async def refresh_panels_when_ready(self) -> None:
+        """Redraw every tracked panel once the gateway is up.
+
+        cog_load runs before the bot is connected, so fetching the channels
+        has to wait. Failures are logged and swallowed: a panel that cannot be
+        redrawn is stale, which is not a reason to take the cog down.
+        """
+        await self.bot.wait_until_ready()
+        try:
+            await self.refresh_panels()
+        except Exception:
+            self.bot.logger.exception("CTC: could not refresh panels on startup")
 
     async def refresh_panels(self, *, unit: str | None = None) -> None:
         """Re-render the catalogue in panels that embed one.

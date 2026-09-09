@@ -1756,6 +1756,22 @@ def _() -> None:
     assert cog2.is_manager(loose.require("am2"), me)
 
 
+
+@check("panels redraw on startup, so config changes reach them")
+def _() -> None:
+    src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
+    load = src[src.index("async def cog_load"):src.index("async def cog_unload")]
+    assert "refresh_panels_when_ready()" in load, (
+        "a pinned panel would keep showing the old site links until someone "
+        "re-ran /badge panel by hand"
+    )
+    ready = src[src.index("async def refresh_panels_when_ready"):src.index("async def refresh_panels(")]
+    # cog_load runs before the gateway is up, so fetching channels must wait.
+    assert "await self.bot.wait_until_ready()" in ready
+    # And a panel that cannot be redrawn must not take the cog down.
+    assert "except Exception" in ready
+
+
 def main() -> int:
     passed = 0
     total = 0
