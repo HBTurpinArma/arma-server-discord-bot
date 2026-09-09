@@ -1704,6 +1704,58 @@ def _() -> None:
     assert all(e.title.endswith("2nd Battalion") for e in embeds), [e.title for e in embeds]
 
 
+
+@check("a manager staffs every battalion without holding any battalion's roles")
+def _() -> None:
+    from cogs.ctc import CTC
+
+    ME, AM2_TS, AM1_TS = 111, 222, 333
+    cog = CTC.__new__(CTC)
+    cog.units = Units(
+        {
+            "manager_ids": [ME],
+            "primary_unit": "am2",
+            "units": {
+                "am2": {"catalogue": "catalogue.json", "instructor_role_id": [AM2_TS],
+                        "assign_role_id": AM2_TS, "config_role_id": AM2_TS},
+                "am1": {"catalogue": "am1.json", "instructor_role_id": [AM1_TS],
+                        "assign_role_id": AM1_TS, "config_role_id": AM1_TS},
+            },
+        },
+        DEFAULTS,
+    )
+    me = FakeMember(ME)                 # deliberately holds no battalion role
+    theirs = FakeMember(9, [AM2_TS])
+    nobody = FakeMember(10)
+
+    for key in ("am2", "am1"):
+        unit = cog.units.require(key)
+        assert cog.is_instructor(unit, me), f"manager cannot work {key}"
+        assert cog.can_assign(unit, me), f"manager cannot assign in {key}"
+        assert cog.can_configure(unit, me), f"manager cannot configure {key}"
+        assert cog.can_post_panel(unit, me), f"manager cannot post {key}'s panel"
+        assert cog.can_request(unit, me), f"manager cannot request in {key}"
+
+    # One battalion's staff still cannot reach the other.
+    assert cog.is_instructor(cog.units.require("am2"), theirs)
+    assert not cog.is_instructor(cog.units.require("am1"), theirs)
+    assert not cog.is_instructor(cog.units.require("am2"), nobody)
+
+    # A manager holds no battalion roles, so routing must still ask rather
+    # than guess which battalion they meant.
+    assert cog.units.for_member(me) is None
+
+    # Pasted mentions and bare ids both work, since people paste what Discord
+    # gives them.
+    loose = Units(
+        {"manager_ids": ["<@111>"], "units": {"am2": {"catalogue": "catalogue.json"}}},
+        DEFAULTS,
+    )
+    cog2 = CTC.__new__(CTC)
+    cog2.units = loose
+    assert cog2.is_manager(loose.require("am2"), me)
+
+
 def main() -> int:
     passed = 0
     total = 0
