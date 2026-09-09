@@ -1,5 +1,5 @@
 {
-  "_comment": "1st Battalion's badge catalogue. Started as a copy of 2nd Battalion's and diverges from here — the two are edited independently, and /badge config only ever touches the one belonging to the unit the session started in.",
+  "_comment": "1st Battalion's badge catalogue. Starts as a subset of 2nd Battalion's: AM1 runs Rifleman and Machine Gunner as Gun Range variants, AT under Support Weapons, and SL/FTL under Leadership. Every category is kept, even empty ones, so /badge config can add any badge AM2 has -- the editor only offers categories this file defines. The two files are edited independently.",
   "_badgeTypes": {
     "tab": "levels: [] — no levels at all (Airborne, Radio, JTAC).",
     "graded": "levels: [...] — the member picks every level they need run, and the instructor runs them in one session.",
@@ -48,41 +48,17 @@
   },
   "badges": [
     {
-      "key": "airborne",
-      "name": "Airborne",
-      "category": "tabs",
-      "levels": []
-    },
-    {
-      "key": "radio",
-      "name": "Radio",
-      "category": "tabs",
-      "levels": []
-    },
-    {
-      "key": "jtac",
-      "name": "JTAC",
-      "category": "tabs",
-      "levels": [],
-      "wip": true
-    },
-    {
       "key": "gun_range",
       "name": "Gun Range",
       "category": "infantry",
       "levels": [
         "B",
-        "A",
-        "E",
-        "M"
+        "A"
       ],
       "timed": true,
       "variants": [
         "Rifle",
-        "Pistol",
-        "SMG",
-        "Shotgun",
-        "HMG"
+        "Machine Gunner"
       ],
       "formerNames": [
         "HMG"
@@ -107,8 +83,7 @@
       "category": "infantry",
       "levels": [
         "B",
-        "A",
-        "E"
+        "A"
       ]
     },
     {
@@ -117,8 +92,7 @@
       "category": "support",
       "levels": [
         "B",
-        "A",
-        "E"
+        "A"
       ]
     },
     {
@@ -127,19 +101,7 @@
       "category": "support",
       "levels": [
         "B",
-        "A",
-        "E"
-      ],
-      "wip": true
-    },
-    {
-      "key": "scouting",
-      "name": "Scouting",
-      "category": "infantry",
-      "levels": [
-        "B",
-        "A",
-        "E"
+        "A"
       ]
     },
     {
@@ -152,30 +114,6 @@
       ]
     },
     {
-      "key": "combat_eng",
-      "name": "Combat Engineer",
-      "category": "support",
-      "levels": [
-        "B",
-        "A",
-        "E"
-      ],
-      "formerNames": [
-        "Explosive Ordnance"
-      ],
-      "wip": true
-    },
-    {
-      "key": "indirect",
-      "name": "Indirect Fire",
-      "category": "support",
-      "levels": [
-        "B",
-        "A",
-        "E"
-      ]
-    },
-    {
       "key": "vehicle",
       "name": "Vehicle",
       "category": "vehicles",
@@ -183,8 +121,7 @@
         "B",
         "A",
         "E"
-      ],
-      "wip": true
+      ]
     },
     {
       "key": "rotary",
@@ -197,29 +134,8 @@
       ]
     },
     {
-      "key": "fixed_wing",
-      "name": "Fixed Wing",
-      "category": "vehicles",
-      "levels": [
-        "B",
-        "A",
-        "E"
-      ]
-    },
-    {
       "key": "leadership",
       "name": "Leadership",
-      "category": "command",
-      "levels": [
-        "B",
-        "A",
-        "E"
-      ],
-      "wip": true
-    },
-    {
-      "key": "game_master",
-      "name": "Game Master",
       "category": "command",
       "levels": [
         "B",
