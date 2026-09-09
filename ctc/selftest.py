@@ -1596,6 +1596,66 @@ def _() -> None:
     assert "panels(with_catalogue_only=True, unit=unit)" in refresh
 
 
+
+@check("site links point at the right battalion's pages, or are absent")
+def _() -> None:
+    from ctc.views import badge_url
+
+    URL = "http://am2.taw.net:6001"
+    # The site names pages after the key with underscores swapped for hyphens.
+    assert badge_url(URL, "gun_range") == f"{URL}/badge/gun-range.html"
+    assert badge_url(URL, "cqc") == f"{URL}/badge/cqc.html"
+    # A trailing slash in config must not double up.
+    assert badge_url(URL + "/", "cqc") == f"{URL}/badge/cqc.html"
+
+    row = {
+        "id": 1, "member_id": "5", "badge_key": "cqc", "levels": None,
+        "levels_achieved": None, "variant": None, "status": "requested",
+        "instructor_id": None, "created_at": "2026-01-01 00:00:00", "notes": None,
+    }
+
+    # Configured: every surface carries a link.
+    assert "badge/cqc.html" in ticket_embed(CAT, row, URL).description
+    assert any(f.name == "Full details" for f in catalogue_embed(CAT, URL).fields)
+    panel = entry_point_payload(
+        CAT, with_catalogue=False, unit="am2", site_url=URL
+    )["embeds"][0]
+    assert URL in panel.description
+
+    # Unset: nothing is added, so a server without a site sees no dead links.
+    assert "http" not in ticket_embed(CAT, row).description
+    assert not any(f.name == "Full details" for f in catalogue_embed(CAT).fields)
+    bare = entry_point_payload(CAT, with_catalogue=False, unit="am2")["embeds"][0]
+    assert "http" not in bare.description
+
+
+@check("site_url is per battalion, so each links to its own site")
+def _() -> None:
+    from cogs.ctc import DEFAULTS
+
+    assert DEFAULTS["site_url"] == "", "unset by default"
+
+    units = Units(
+        {
+            "primary_unit": "am2",
+            "units": {
+                "am2": {"catalogue": "catalogue.json", "site_url": "http://x:6002"},
+                "am1": {"catalogue": "am1.json", "site_url": "http://x:6001"},
+            },
+        },
+        DEFAULTS,
+    )
+    assert units.require("am2").settings["site_url"] == "http://x:6002"
+    assert units.require("am1").settings["site_url"] == "http://x:6001"
+
+    # A shared block still works for a server with one site.
+    shared = Units(
+        {"site_url": "http://x:6001", "units": {"am1": {"catalogue": "am1.json"}}},
+        DEFAULTS,
+    )
+    assert shared.require("am1").settings["site_url"] == "http://x:6001"
+
+
 def main() -> int:
     passed = 0
     total = 0

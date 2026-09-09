@@ -62,6 +62,7 @@ ability:
 | `config_role_id` | `0` | Who may edit the catalogue. `0` falls back to the Manage Server permission. |
 | `assign_role_id` | `0` | Who may set who is working on a request. `0` falls back to the instructor roles. |
 | `member_role_id` | `0` | Who may raise a request with this unit. `0` means anyone. Staff can always request. |
+| `site_url` | `""` | This battalion's website. Adds links to the catalogue, the panel and every ticket. Blank adds none. |
 | `panel_role_id` | `0` | Who may post the request panel. `0` falls back to the Manage Server permission. |
 | `taw_award_url` | `""` | Deep link on completed tickets. Omitted if blank. |
 | `create_threads` | `true` | `false` posts cards in the channel instead. |
@@ -207,6 +208,23 @@ working too: their old `ctc:panel:open` id resolves to the primary unit.
 To split later, add the `units` block and set `primary_unit` to whichever key
 represents the battalion that was already running — that is where the history
 goes.
+
+### Links to the website
+
+Set `site_url` to that battalion's site and three places gain links:
+
+- `/badge catalogue` and the pinned panel get **Browse every badge** and
+  **Training board**
+- every ticket card gets **What this badge covers**, straight to that badge's
+  page
+
+It is per unit, so each battalion links to its own site and never the other's.
+Blank, and no links appear at all, so a server with no website shows nothing
+dead.
+
+Badge pages are `<site_url>/badge/<key with underscores as hyphens>.html`,
+matching how the site names its files. Rename a badge and the key stays, so
+the link keeps working.
 
 ## Commands
 
@@ -391,7 +409,7 @@ through `/badge config`.
 python -m ctc.selftest
 ```
 
-72 offline checks — catalogue validation, all three badge kinds, variants, the
+75 offline checks — catalogue validation, all three badge kinds, variants, the
 full request lifecycle, amendments, and that every view fits Discord's component
 limits. No Discord connection required.
 
