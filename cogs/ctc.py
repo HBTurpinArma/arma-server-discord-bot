@@ -62,6 +62,7 @@ DEFAULTS: dict[str, Any] = {
     "lock_on_award": False,
     "assign_role_id": 0,
     "member_role_id": 0,
+    "site_url": "",
     "daily_bump": True,
     "nudge_unclaimed_hours": 48,
     "nudge_unawarded_hours": 72,
@@ -422,7 +423,7 @@ class CTC(commands.Cog, name="ctc"):
             is_forum = isinstance(channel, discord.ForumChannel)
             role_ids = self.role_ids(unit, "instructor_role_id")
             base_pings = [f"<@&{i}>" for i in role_ids]
-            embed = ticket_embed(cat, row)
+            embed = ticket_embed(cat, row, settings["site_url"])
             view = ticket_view(
                 cat, row, award_url=settings["taw_award_url"] or None
             )
@@ -536,7 +537,9 @@ class CTC(commands.Cog, name="ctc"):
             )
             message = await channel.fetch_message(int(row["queue_message_id"]))
             await message.edit(
-                embed=ticket_embed(self.catalogue_of(row), row),
+                embed=ticket_embed(
+                    self.catalogue_of(row), row, self.settings_of(row)["site_url"]
+                ),
                 view=ticket_view(
                     self.catalogue_of(row),
                     row,
@@ -652,7 +655,8 @@ class CTC(commands.Cog, name="ctc"):
         if unit is None:
             return
         await interaction.response.send_message(
-            embed=catalogue_embed(unit.catalogue), ephemeral=True
+            embed=catalogue_embed(unit.catalogue, unit.settings["site_url"]),
+            ephemeral=True,
         )
 
     @badge.command(name="queue", description="Show open badge requests")
@@ -906,6 +910,7 @@ class CTC(commands.Cog, name="ctc"):
                         with_catalogue=True,
                         unit=unit.key,
                         unit_name=unit.name if len(self.units) > 1 else None,
+                        site_url=unit.settings["site_url"],
                     )
                 )
             except discord.NotFound:
@@ -945,6 +950,7 @@ class CTC(commands.Cog, name="ctc"):
             with_catalogue=catalogue,
             unit=unit.key,
             unit_name=unit.name if len(self.units) > 1 else None,
+            site_url=unit.settings["site_url"],
         )
 
         # Adopting an existing panel: rewrite it in place and start tracking it,
@@ -1123,7 +1129,9 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         await interaction.response.edit_message(
-            embed=ticket_embed(self.catalogue_of(updated), updated),
+            embed=ticket_embed(
+                self.catalogue_of(updated), updated, self.settings_of(updated)["site_url"]
+            ),
             view=ticket_view(
                 self.catalogue_of(updated),
                 updated,

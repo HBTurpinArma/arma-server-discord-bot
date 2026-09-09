@@ -26,6 +26,16 @@ MAX_BADGES_PER_REQUEST = 5
 
 COLOUR = 0x5865F2
 
+
+def badge_url(site_url: str, badge_key: str) -> str:
+    """This badge's page on the battalion's website.
+
+    The site names pages after the badge key with underscores swapped for
+    hyphens; the two have to stay in step or every link 404s.
+    """
+    return f"{site_url.rstrip('/')}/badge/{badge_key.replace('_', '-')}.html"
+
+
 STATUS_STYLE: dict[str, tuple[int, str, str]] = {
     "requested": (0x5865F2, "\N{INBOX TRAY}", "Awaiting instructor"),
     "claimed": (0xFEE75C, "\N{RAISED HAND}", "Claimed"),
@@ -57,7 +67,7 @@ def describe_kind(badge: Badge) -> str:
 # ----------------------------------------------------------------- embeds
 
 
-def catalogue_embed(cat: Catalogue) -> discord.Embed:
+def catalogue_embed(cat: Catalogue, site_url: str = "") -> discord.Embed:
     """The badge list, grouped by category. Shared by /badge catalogue and the panel."""
     embed = discord.Embed(colour=COLOUR, title="\N{MILITARY MEDAL} Badge catalogue")
 
@@ -116,13 +126,22 @@ def catalogue_embed(cat: Catalogue) -> discord.Embed:
         key.append("~~Struck through~~ still in development, not yet requestable")
 
     embed.add_field(name="Key", value="\n".join(key), inline=False)
+    if site_url:
+        embed.add_field(
+            name="Full details",
+            value=(
+                f"[Browse every badge]({site_url.rstrip('/')}/) · "
+                f"[Training board]({site_url.rstrip('/')}/stats.html)"
+            ),
+            inline=False,
+        )
     embed.set_footer(
         text=f"{len(cat.all())} badges · {len(cat.requestable())} available to request"
     )
     return embed
 
 
-def ticket_embed(cat: Catalogue, row: Any) -> discord.Embed:
+def ticket_embed(cat: Catalogue, row: Any, site_url: str = "") -> discord.Embed:
     """The ticket card. Re-rendered in place on every status change."""
     colour, emoji, label = style_for(row["status"])
     badge = cat.get(row["badge_key"])
@@ -135,6 +154,10 @@ def ticket_embed(cat: Catalogue, row: Any) -> discord.Embed:
         description=f"Requested by <@{row['member_id']}>",
     )
     embed.set_footer(text=f"Request #{row['id']}")
+    if site_url and badge is not None:
+        embed.description += (
+            "\n" + f"[What this badge covers]({badge_url(site_url, badge.key)})"
+        )
 
     # The whole point of the ticket: the instructor needs to know what to run.
     if requested:
@@ -965,7 +988,12 @@ def panel_view(unit: str) -> discord.ui.View:
 
 
 def entry_point_payload(
-    cat: Catalogue, *, with_catalogue: bool, unit: str, unit_name: str | None = None
+    cat: Catalogue,
+    *,
+    with_catalogue: bool,
+    unit: str,
+    unit_name: str | None = None,
+    site_url: str = "",
 ) -> dict[str, Any]:
     """The pinnable panel. Members click rather than remembering a command.
 
@@ -981,7 +1009,13 @@ def entry_point_payload(
         description=(
             "Click below to request training for one or more badges.\n"
             "You can also use `/badge request` anywhere in the server."
+        )
+        + (
+            f"\n\n[Browse every badge]({site_url.rstrip('/')}/) \N{MIDDLE DOT} "
+            f"[Training board]({site_url.rstrip('/')}/stats.html)"
+            if site_url
+            else ""
         ),
     )
-    embeds = [catalogue_embed(cat), panel] if with_catalogue else [panel]
+    embeds = [catalogue_embed(cat, site_url), panel] if with_catalogue else [panel]
     return {"embeds": embeds, "view": panel_view(unit)}
