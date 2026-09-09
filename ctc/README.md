@@ -217,7 +217,7 @@ can claim, complete, award, assign, configure and post panels in **every**
 unit, without holding any unit's roles.
 
 ```json
-"manager_ids": [218718124357320706]
+"manager_ids": [1111111111111111111]
 ```
 
 Set it in the shared block so it covers battalions added later. A bare id, a
