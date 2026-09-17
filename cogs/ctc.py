@@ -76,6 +76,8 @@ DEFAULTS: dict[str, Any] = {
 LATER_COLUMNS: dict[str, dict[str, str]] = {
     "ctc_requests": {
         "bump_message_id": "TEXT",
+        "nudge_message_id": "TEXT",
+        "nudge_channel_id": "TEXT",
         "unit": "TEXT",
     },
     "ctc_panels": {"unit": "TEXT"},
@@ -612,6 +614,9 @@ class CTC(commands.Cog, name="ctc"):
             # use for one, and it cannot be deleted once the thread is closed.
             await self.clear_bump(thread, row["bump_message_id"])
             await self.database.set_bump_message(int(row["id"]), None)
+            # Same for the chase-up: whatever it was asking for has happened.
+            await self.clear_nudge(row["nudge_channel_id"], row["nudge_message_id"])
+            await self.database.set_nudge_message(int(row["id"]), None, None)
 
             edits: dict[str, Any] = {}
             name = closed_name(thread.name)
@@ -1409,29 +1414,25 @@ class CTC(commands.Cog, name="ctc"):
             for row in await self.database.stale(
                 "requested", unclaimed_hours, unit=unit.key
             ):
-                sent = await self._nudge(
+                await self._nudge(
                     row,
                     f"{mention} — still unclaimed after {unclaimed_hours}h: "
                     f"**{unit.catalogue.label(row['badge_key'], row['levels'])}** "
                     f"for <@{row['member_id']}>.",
                     role_ids=role_ids,
                 )
-                if sent:
-                    await self.database.mark_nudged(int(row["id"]))
 
             await self._nudge_unawarded(unit)
 
     async def _nudge_unawarded(self, unit: Unit) -> None:
         unawarded_hours = int(unit.settings["nudge_unawarded_hours"])
         for row in await self.database.stale("completed", unawarded_hours, unit=unit.key):
-            sent = await self._nudge(
+            await self._nudge(
                 row,
                 f"<@{row['instructor_id']}> — this was run {unawarded_hours}h ago but isn't "
                 "marked awarded on taw.net yet.",
                 user_id=row["instructor_id"],
             )
-            if sent:
-                await self.database.mark_nudged(int(row["id"]))
 
     async def _nudge(
         self,
@@ -1441,6 +1442,14 @@ class CTC(commands.Cog, name="ctc"):
         role_ids: Sequence[int] = (),
         user_id: str | None = None,
     ) -> bool:
+        """Chase a request once, replacing the last chase-up for the same row.
+
+        A nudge repeats every day the work sits there, and left to accumulate
+        that turns the thread into a column of identical reminders nobody
+        reads. Only the newest is kept, the same way the keep-alive bump
+        replaces yesterday's: the old one is deleted after the new one lands,
+        so the request is never briefly unchased.
+        """
         allowed = discord.AllowedMentions(
             roles=[discord.Object(id=i) for i in role_ids] if role_ids else False,
             users=[discord.Object(id=int(user_id))] if user_id else False,
@@ -1452,11 +1461,31 @@ class CTC(commands.Cog, name="ctc"):
                 channel = self.bot.get_channel(int(channel_id)) or await self.bot.fetch_channel(
                     int(channel_id)
                 )
-                await channel.send(content, allowed_mentions=allowed)
-                return True
+                message = await channel.send(content, allowed_mentions=allowed)
             except discord.HTTPException:
                 continue
+
+            await self.clear_nudge(row["nudge_channel_id"], row["nudge_message_id"])
+            await self.database.set_nudge_message(
+                int(row["id"]), str(channel_id), str(message.id)
+            )
+            await self.database.mark_nudged(int(row["id"]))
+            return True
         return False
+
+    async def clear_nudge(self, channel_id: str | None, message_id: str | None) -> None:
+        """Delete a previous chase-up, if it is still there.
+
+        Best effort, like the bump: someone may have tidied it away by hand,
+        and a reminder that cannot be deleted is untidy rather than broken.
+        """
+        if not channel_id or not message_id:
+            return
+        with contextlib.suppress(discord.HTTPException):
+            channel = self.bot.get_channel(int(channel_id)) or await self.bot.fetch_channel(
+                int(channel_id)
+            )
+            await (await channel.fetch_message(int(message_id))).delete()
 
     @nudge_loop.before_loop
     async def before_nudge_loop(self) -> None:
