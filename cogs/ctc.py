@@ -64,7 +64,10 @@ DEFAULTS: dict[str, Any] = {
     "member_role_id": 0,
     "site_url": "",
     "manager_ids": [],
+    # Keep-alive for open request threads. The key is historical: it switches
+    # the bump on and off, and `bump_days` says how often it lands.
     "daily_bump": True,
+    "bump_days": 3,
     "nudge_unclaimed_hours": 48,
     "nudge_unawarded_hours": 72,
 }
@@ -76,6 +79,9 @@ DEFAULTS: dict[str, Any] = {
 LATER_COLUMNS: dict[str, dict[str, str]] = {
     "ctc_requests": {
         "bump_message_id": "TEXT",
+        "bumped_at": "TEXT",
+        "nudge_message_id": "TEXT",
+        "nudge_channel_id": "TEXT",
         "unit": "TEXT",
     },
     "ctc_panels": {"unit": "TEXT"},
@@ -128,6 +134,36 @@ def open_name(name: str) -> str:
     the thread no longer reads as closed.
     """
     return name[len(CLOSED_PREFIX):] if name.startswith(CLOSED_PREFIX) else name
+
+
+def bump_due(last: str | None, thread: Any, days: int) -> bool:
+    """Whether a thread is due another keep-alive.
+
+    Bumps are spaced ``days`` apart, but never further apart than the thread's
+    own auto-archive window — a channel set to archive after a day would see
+    the thread gone two days before a three-day bump arrived, which is the one
+    thing the bump exists to prevent. Where the two disagree the window wins.
+
+    Two hours come off the window as margin: the loop runs at midnight, the
+    window started whenever the thread last saw a message, and a bump that
+    lands at exactly the deadline has already missed it.
+
+    A row with no stamp has never been bumped, so it is due now.
+    """
+    if not last:
+        return True
+    try:
+        since = datetime.datetime.fromisoformat(last).replace(tzinfo=datetime.timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    hours = days * 24
+    # discord.py reports the window in minutes; a thread type without one
+    # cannot auto-archive, so only the configured spacing applies.
+    window = getattr(thread, "auto_archive_duration", 0) or 0
+    if window:
+        hours = min(hours, max(window / 60 - 2, 1))
+    elapsed = datetime.datetime.now(datetime.timezone.utc) - since
+    return elapsed.total_seconds() >= hours * 3600
 
 
 def split_mentions(mentions: Sequence[str]) -> tuple[list[int], list[int]]:
@@ -612,6 +648,9 @@ class CTC(commands.Cog, name="ctc"):
             # use for one, and it cannot be deleted once the thread is closed.
             await self.clear_bump(thread, row["bump_message_id"])
             await self.database.set_bump_message(int(row["id"]), None)
+            # Same for the chase-up: whatever it was asking for has happened.
+            await self.clear_nudge(row["nudge_channel_id"], row["nudge_message_id"])
+            await self.database.set_nudge_message(int(row["id"]), None, None)
 
             edits: dict[str, Any] = {}
             name = closed_name(thread.name)
@@ -837,7 +876,7 @@ class CTC(commands.Cog, name="ctc"):
                 return badge.name if badge else key
 
             embed.add_field(
-                name="Avg days to award",
+                name="Avg days to submit",
                 value="\n".join(
                     f"{badge_name(r['badge_key'])} — **{r['avg_days']}d** ({r['n']})"
                     for r in stats["turnaround"][:15]
@@ -1160,7 +1199,7 @@ class CTC(commands.Cog, name="ctc"):
             "claim": ("claimed", "claimed"),
             "release": ("requested", "released"),
             "complete": ("completed", "marked as run"),
-            "award": ("awarded", "awarded on taw.net"),
+            "award": ("awarded", "submitted on taw.net"),
             "cancel": ("cancelled", "cancelled"),
         }
         if action not in targets:
@@ -1198,7 +1237,8 @@ class CTC(commands.Cog, name="ctc"):
                 updated,
                 f"<@{updated['member_id']}> — "
                 f"**{self.catalogue_of(updated).label(updated['badge_key'], awarded)}**"
-                " is on your record. Congratulations. \N{MILITARY MEDAL}",
+                " has been submitted on taw.net. BATCOM will award it when they"
+                " can. Congratulations. \N{MILITARY MEDAL}",
             )
             # Close last — anything sent afterwards would reopen the thread.
             await self.close_thread(updated)
@@ -1349,6 +1389,11 @@ class CTC(commands.Cog, name="ctc"):
         Deliberately silent: no mentions, so it keeps threads alive without
         notifying anybody.
 
+        The loop ticks nightly but a thread is only bumped every `bump_days`,
+        measured from the stamp on the row. Nightly-and-skip rather than a
+        72-hour timer because a timer restarts with the bot, and a bot that
+        restarts most days would never reach the end of one.
+
         Yesterday's bump is deleted only *after* today's has landed, so a
         thread is never briefly without one and the inactivity clock is reset
         by a message that genuinely exists. Posting and immediately deleting
@@ -1358,8 +1403,10 @@ class CTC(commands.Cog, name="ctc"):
         if self.database is None:
             return
         for row in await self.database.queue():
-            if not row["thread_id"] or not self.settings_of(row)["daily_bump"]:
+            settings = self.settings_of(row)
+            if not row["thread_id"] or not settings["daily_bump"]:
                 continue
+            days = max(int(settings["bump_days"]), 1)
             try:
                 thread = self.bot.get_channel(
                     int(row["thread_id"])
@@ -1368,8 +1415,10 @@ class CTC(commands.Cog, name="ctc"):
                 # would silently unarchive it, so leave it be.
                 if getattr(thread, "archived", False):
                     continue
+                if not bump_due(row["bumped_at"], thread, days):
+                    continue
                 message = await thread.send(
-                    "Bump to keep alive",
+                    f"Bump to keep alive ({days} day bump)",
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             except discord.HTTPException as error:
@@ -1409,29 +1458,25 @@ class CTC(commands.Cog, name="ctc"):
             for row in await self.database.stale(
                 "requested", unclaimed_hours, unit=unit.key
             ):
-                sent = await self._nudge(
+                await self._nudge(
                     row,
                     f"{mention} — still unclaimed after {unclaimed_hours}h: "
                     f"**{unit.catalogue.label(row['badge_key'], row['levels'])}** "
                     f"for <@{row['member_id']}>.",
                     role_ids=role_ids,
                 )
-                if sent:
-                    await self.database.mark_nudged(int(row["id"]))
 
             await self._nudge_unawarded(unit)
 
     async def _nudge_unawarded(self, unit: Unit) -> None:
         unawarded_hours = int(unit.settings["nudge_unawarded_hours"])
         for row in await self.database.stale("completed", unawarded_hours, unit=unit.key):
-            sent = await self._nudge(
+            await self._nudge(
                 row,
                 f"<@{row['instructor_id']}> — this was run {unawarded_hours}h ago but isn't "
-                "marked awarded on taw.net yet.",
+                "submitted on taw.net yet.",
                 user_id=row["instructor_id"],
             )
-            if sent:
-                await self.database.mark_nudged(int(row["id"]))
 
     async def _nudge(
         self,
@@ -1441,6 +1486,14 @@ class CTC(commands.Cog, name="ctc"):
         role_ids: Sequence[int] = (),
         user_id: str | None = None,
     ) -> bool:
+        """Chase a request once, replacing the last chase-up for the same row.
+
+        A nudge repeats every day the work sits there, and left to accumulate
+        that turns the thread into a column of identical reminders nobody
+        reads. Only the newest is kept, the same way the keep-alive bump
+        replaces yesterday's: the old one is deleted after the new one lands,
+        so the request is never briefly unchased.
+        """
         allowed = discord.AllowedMentions(
             roles=[discord.Object(id=i) for i in role_ids] if role_ids else False,
             users=[discord.Object(id=int(user_id))] if user_id else False,
@@ -1452,11 +1505,31 @@ class CTC(commands.Cog, name="ctc"):
                 channel = self.bot.get_channel(int(channel_id)) or await self.bot.fetch_channel(
                     int(channel_id)
                 )
-                await channel.send(content, allowed_mentions=allowed)
-                return True
+                message = await channel.send(content, allowed_mentions=allowed)
             except discord.HTTPException:
                 continue
+
+            await self.clear_nudge(row["nudge_channel_id"], row["nudge_message_id"])
+            await self.database.set_nudge_message(
+                int(row["id"]), str(channel_id), str(message.id)
+            )
+            await self.database.mark_nudged(int(row["id"]))
+            return True
         return False
+
+    async def clear_nudge(self, channel_id: str | None, message_id: str | None) -> None:
+        """Delete a previous chase-up, if it is still there.
+
+        Best effort, like the bump: someone may have tidied it away by hand,
+        and a reminder that cannot be deleted is untidy rather than broken.
+        """
+        if not channel_id or not message_id:
+            return
+        with contextlib.suppress(discord.HTTPException):
+            channel = self.bot.get_channel(int(channel_id)) or await self.bot.fetch_channel(
+                int(channel_id)
+            )
+            await (await channel.fetch_message(int(message_id))).delete()
 
     @nudge_loop.before_loop
     async def before_nudge_loop(self) -> None:

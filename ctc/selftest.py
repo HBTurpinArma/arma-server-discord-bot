@@ -836,7 +836,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
                     "claimed",
                     ["All passed", "Partial", "Release", f"Reassign{ellipsis}", "Cancel"],
                 ),
-                ("completed", ["Open taw.net", "Awarded on taw.net", "Reopen"]),
+                ("completed", ["Open taw.net", "Submitted on taw.net", "Reopen"]),
                 ("awarded", []),
                 ("cancelled", []),
             ]:
@@ -1258,7 +1258,7 @@ def _() -> None:
     assert "await self.reopen_thread(updated)" in src
 
 
-@check("the daily bump is silent, skips archived threads, and can be switched off")
+@check("the keep-alive bump is silent, skips archived threads, and can be switched off")
 def _() -> None:
     from cogs.ctc import DEFAULTS
 
@@ -1266,16 +1266,61 @@ def _() -> None:
 
     src = (ROOT.parent / "cogs" / "ctc.py").read_text(encoding="utf-8")
     bump = src[src.index("async def bump_loop"):src.index("async def clear_bump")]
-    assert '"Bump to keep alive"' in bump
+    assert 'f"Bump to keep alive ({days} day bump)"' in bump
     # No pings: the point is to keep threads alive, not to notify anyone.
     assert "AllowedMentions.none()" in bump
     # Posting into an archived thread would silently unarchive it.
     assert 'getattr(thread, "archived", False)' in bump
     assert 'daily_bump' in bump
-    # Runs once a day at a fixed time, not on an interval.
+    # Runs once a day at a fixed time, not on an interval: an interval timer
+    # restarts with the bot, and a bot restarted most days never finishes one.
     assert "tasks.loop(time=datetime.time(hour=0, minute=0" in src
+    # The nightly tick only acts every `bump_days`, measured from the row.
+    assert DEFAULTS["bump_days"] == 3
+    assert "bump_due(row[\"bumped_at\"], thread, days)" in bump
     assert "self.bump_loop.start()" in src
     assert "self.bump_loop.cancel()" in src
+
+
+@check("bumps are spaced out, but never past the thread's archive window")
+def _() -> None:
+    import datetime as dt
+    from types import SimpleNamespace
+
+    from cogs.ctc import bump_due
+
+    def ago(hours: float) -> str:
+        """A stamp in SQLite's format, as the row would carry it."""
+        when = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)
+        return when.strftime("%Y-%m-%d %H:%M:%S")
+
+    week = SimpleNamespace(auto_archive_duration=10080)   # 7 days
+    three = SimpleNamespace(auto_archive_duration=4320)   # 3 days
+    day = SimpleNamespace(auto_archive_duration=1440)     # 1 day
+
+    # Never bumped, or a stamp that cannot be read: bump now rather than
+    # leave a thread to archive over a parsing problem.
+    assert bump_due(None, week, 3)
+    assert bump_due("", week, 3)
+    assert bump_due("not a date", week, 3)
+
+    # Plenty of window: the configured spacing is what applies.
+    assert not bump_due(ago(1), week, 3)
+    assert not bump_due(ago(60), week, 3)
+    assert bump_due(ago(73), week, 3)
+
+    # Window equal to the spacing: bumping at exactly three days would land on
+    # the deadline, so it goes early.
+    assert bump_due(ago(71), three, 3)
+
+    # Window shorter than the spacing: the window wins, or the thread would be
+    # archived two days before the bump was due.
+    assert not bump_due(ago(10), day, 3)
+    assert bump_due(ago(23), day, 3)
+
+    # A channel type with no auto-archive leaves only the spacing.
+    assert not bump_due(ago(10), SimpleNamespace(), 3)
+    assert bump_due(ago(73), SimpleNamespace(), 3)
 
 
 @check("each bump replaces the last rather than piling up")

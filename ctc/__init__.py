@@ -396,10 +396,32 @@ class CTCDatabaseManager:
         await self.connection.commit()
 
     async def set_bump_message(self, request_id: int, message_id: str | None) -> None:
-        """Remember the keep-alive message, so the next one can replace it."""
+        """Remember the keep-alive message, so the next one can replace it.
+
+        The time goes in alongside it: bumps are spaced days apart now, and
+        the gap has to survive restarts, so it is measured from a stamp in the
+        row rather than from a timer in the process.
+        """
         await self.connection.execute(
-            "UPDATE ctc_requests SET bump_message_id = ? WHERE id = ?",
-            (message_id, request_id),
+            "UPDATE ctc_requests SET bump_message_id = ?, "
+            "bumped_at = CASE WHEN ? IS NULL THEN NULL ELSE datetime('now') END "
+            "WHERE id = ?",
+            (message_id, message_id, request_id),
+        )
+        await self.connection.commit()
+
+    async def set_nudge_message(
+        self, request_id: int, channel_id: str | None, message_id: str | None
+    ) -> None:
+        """Remember the chase-up, so the next one can replace it.
+
+        The channel comes along because a nudge lands in the request's thread
+        or, if that fails, the queue channel - deleting it later means knowing
+        which.
+        """
+        await self.connection.execute(
+            "UPDATE ctc_requests SET nudge_channel_id = ?, nudge_message_id = ? WHERE id = ?",
+            (channel_id, message_id, request_id),
         )
         await self.connection.commit()
 

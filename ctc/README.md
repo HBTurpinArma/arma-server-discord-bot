@@ -20,7 +20,7 @@ Member                          Instructor
                                [ Partial ] / [ Record result ]
                                   ↓
                                [ Open taw.net ]   ← the one manual step
-                               [ Awarded ] ──────→ done, thread archived
+                               [ Submitted ] ────→ done, thread archived
 ```
 
 ## Setup
@@ -39,6 +39,7 @@ Add to `config.json` under `discord`:
   "hide_thread_notices": true,
   "archive_on_award": true,
   "daily_bump": true,
+  "bump_days": 3,
   "lock_on_award": false,
   "nudge_unclaimed_hours": 48,
   "nudge_unawarded_hours": 72
@@ -69,8 +70,9 @@ ability:
 | `create_threads` | `true` | `false` posts cards in the channel instead. |
 | `private_threads` | `false` | `true` makes each request a private thread. See below. |
 | `hide_thread_notices` | `true` | Deletes Discord's "started a thread" message. Needs Manage Messages. |
-| `archive_on_award` | `true` | Archives the thread once awarded or cancelled. |
-| `daily_bump` | `true` | Posts a silent daily line in open threads so they do not auto-archive. |
+| `archive_on_award` | `true` | Archives the thread once submitted or cancelled. |
+| `daily_bump` | `true` | Posts a silent line in open threads so they do not auto-archive. |
+| `bump_days` | `3` | How many days between those lines. Capped by the thread's own auto-archive window. |
 | `lock_on_award` | `false` | Also locks it, so only moderators can reopen. |
 
 A Forum channel is detected automatically — each request becomes a forum post
@@ -315,14 +317,20 @@ prefix back off.
 Names are capped at Discord's 100 characters, so a very long one loses its tail
 to make room. Closing twice does not stack the prefix.
 
-Open threads get a silent **"Bump to keep alive"** once a day at **00:00 UTC**.
-Each day's bump replaces the previous one, so a thread carries exactly one
-keep-alive line however long it stays open, and closing a request removes it.
+Open threads get a silent **"Bump to keep alive (3 day bump)"** every
+`bump_days` days, checked at **00:00 UTC**. Each bump replaces the previous
+one, so a thread carries exactly one keep-alive line however long it stays
+open, and closing a request removes it.
 Discord auto-archives an inactive thread, and a request waiting on someone's
 availability can easily go quiet for longer than that; any message resets the
 timer. The bump carries no mentions, so it keeps threads alive without
 notifying anyone, and it skips threads that are already archived — posting into
 one would silently unarchive it. Set `daily_bump` to `false` to turn it off.
+
+The spacing is measured from a stamp on the request rather than from a timer,
+so it survives a restart. It is also capped by the thread's own auto-archive
+window: a channel that archives threads after a day gets a daily bump whatever
+`bump_days` says, because a three-day bump would arrive two days too late.
 
 The old bump is deleted only after the new one has posted, so the thread is
 never briefly without a message holding the clock open. Posting and instantly
@@ -349,7 +357,7 @@ from Y to Z`), so a reassignment is not mistaken for the trainer having picked
 it up themselves. The person assigned is added to the thread, which matters on
 a private thread they were never part of.
 
-Awarded and cancelled requests cannot be assigned — there is nothing left to
+Submitted and cancelled requests cannot be assigned — there is nothing left to
 work on. Reopen first.
 
 ## Editing the catalogue
@@ -437,8 +445,12 @@ limits. No Discord connection required.
 
 ## Known limits
 
-- **taw.net is not integrated.** Awarding stays manual: the instructor gets a
-  deep link and one button to confirm. Three manual steps become one.
+- **taw.net is not integrated.** Submitting stays manual: the instructor gets
+  a deep link and one button to confirm. Three manual steps become one.
+- **The bot does not see the award itself.** The instructor submits on
+  taw.net and BATCOM awards it when they can, which happens outside Discord.
+  The queue therefore ends at submitted, and a request marked submitted is
+  not proof the badge has been granted.
 - **No prerequisite or duplicate checking** — the bot cannot see what a member
   already holds on the website.
 - **Badge history is not a record.** taw.net remains the source of truth; this
