@@ -64,7 +64,10 @@ DEFAULTS: dict[str, Any] = {
     "member_role_id": 0,
     "site_url": "",
     "manager_ids": [],
+    # Keep-alive for open request threads. The key is historical: it switches
+    # the bump on and off, and `bump_days` says how often it lands.
     "daily_bump": True,
+    "bump_days": 3,
     "nudge_unclaimed_hours": 48,
     "nudge_unawarded_hours": 72,
 }
@@ -76,6 +79,7 @@ DEFAULTS: dict[str, Any] = {
 LATER_COLUMNS: dict[str, dict[str, str]] = {
     "ctc_requests": {
         "bump_message_id": "TEXT",
+        "bumped_at": "TEXT",
         "nudge_message_id": "TEXT",
         "nudge_channel_id": "TEXT",
         "unit": "TEXT",
@@ -130,6 +134,36 @@ def open_name(name: str) -> str:
     the thread no longer reads as closed.
     """
     return name[len(CLOSED_PREFIX):] if name.startswith(CLOSED_PREFIX) else name
+
+
+def bump_due(last: str | None, thread: Any, days: int) -> bool:
+    """Whether a thread is due another keep-alive.
+
+    Bumps are spaced ``days`` apart, but never further apart than the thread's
+    own auto-archive window — a channel set to archive after a day would see
+    the thread gone two days before a three-day bump arrived, which is the one
+    thing the bump exists to prevent. Where the two disagree the window wins.
+
+    Two hours come off the window as margin: the loop runs at midnight, the
+    window started whenever the thread last saw a message, and a bump that
+    lands at exactly the deadline has already missed it.
+
+    A row with no stamp has never been bumped, so it is due now.
+    """
+    if not last:
+        return True
+    try:
+        since = datetime.datetime.fromisoformat(last).replace(tzinfo=datetime.timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    hours = days * 24
+    # discord.py reports the window in minutes; a thread type without one
+    # cannot auto-archive, so only the configured spacing applies.
+    window = getattr(thread, "auto_archive_duration", 0) or 0
+    if window:
+        hours = min(hours, max(window / 60 - 2, 1))
+    elapsed = datetime.datetime.now(datetime.timezone.utc) - since
+    return elapsed.total_seconds() >= hours * 3600
 
 
 def split_mentions(mentions: Sequence[str]) -> tuple[list[int], list[int]]:
@@ -1354,6 +1388,11 @@ class CTC(commands.Cog, name="ctc"):
         Deliberately silent: no mentions, so it keeps threads alive without
         notifying anybody.
 
+        The loop ticks nightly but a thread is only bumped every `bump_days`,
+        measured from the stamp on the row. Nightly-and-skip rather than a
+        72-hour timer because a timer restarts with the bot, and a bot that
+        restarts most days would never reach the end of one.
+
         Yesterday's bump is deleted only *after* today's has landed, so a
         thread is never briefly without one and the inactivity clock is reset
         by a message that genuinely exists. Posting and immediately deleting
@@ -1363,8 +1402,10 @@ class CTC(commands.Cog, name="ctc"):
         if self.database is None:
             return
         for row in await self.database.queue():
-            if not row["thread_id"] or not self.settings_of(row)["daily_bump"]:
+            settings = self.settings_of(row)
+            if not row["thread_id"] or not settings["daily_bump"]:
                 continue
+            days = max(int(settings["bump_days"]), 1)
             try:
                 thread = self.bot.get_channel(
                     int(row["thread_id"])
@@ -1373,8 +1414,10 @@ class CTC(commands.Cog, name="ctc"):
                 # would silently unarchive it, so leave it be.
                 if getattr(thread, "archived", False):
                     continue
+                if not bump_due(row["bumped_at"], thread, days):
+                    continue
                 message = await thread.send(
-                    "Bump to keep alive",
+                    f"Bump to keep alive ({days} day bump)",
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             except discord.HTTPException as error:
