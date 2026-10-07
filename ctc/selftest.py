@@ -836,7 +836,7 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
                     "claimed",
                     ["All passed", "Partial", "Release", f"Reassign{ellipsis}", "Cancel"],
                 ),
-                ("completed", ["Open taw.net", "Awarded on taw.net", "Reopen"]),
+                ("completed", ["Open taw.net", "Submitted on taw.net", "Reopen"]),
                 ("awarded", []),
                 ("cancelled", []),
             ]:

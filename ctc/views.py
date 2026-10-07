@@ -40,7 +40,7 @@ STATUS_STYLE: dict[str, tuple[int, str, str]] = {
     "requested": (0x5865F2, "\N{INBOX TRAY}", "Awaiting instructor"),
     "claimed": (0xFEE75C, "\N{RAISED HAND}", "Claimed"),
     "completed": (0xEB8C34, "\N{DIRECT HIT}", "Run — awaiting taw.net"),
-    "awarded": (0x57F287, "\N{WHITE HEAVY CHECK MARK}", "Awarded"),
+    "awarded": (0x57F287, "\N{WHITE HEAVY CHECK MARK}", "Submitted"),
     "cancelled": (0x99AAB5, "\N{NO ENTRY SIGN}", "Cancelled"),
 }
 
@@ -218,7 +218,7 @@ def ticket_embed(cat: Catalogue, row: Any, site_url: str = "") -> discord.Embed:
             name="\N{WARNING SIGN} Partial result",
             value=(
                 f"Not achieved: {', '.join(cat.level_name(lvl) for lvl in failed)}. "
-                "Only award the passed levels on taw.net."
+                "Only submit the passed levels on taw.net."
             ),
             inline=False,
         )
@@ -333,6 +333,8 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
     elif status == "completed":
         # taw.net cannot be driven by the bot, so this is the one manual hop
         # left: a deep link out, and a single button to confirm on the way back.
+        # The instructor submits; BATCOM awards it on taw.net in their own
+        # time, which the bot never sees, so this is where the queue ends.
         if award_url:
             view.add_item(
                 discord.ui.Button(
@@ -341,7 +343,7 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
             )
         view.add_item(
             TicketButton(
-                "award", rid, label="Awarded on taw.net",
+                "award", rid, label="Submitted on taw.net",
                 style=discord.ButtonStyle.success, emoji="\N{WHITE HEAVY CHECK MARK}",
             )
         )

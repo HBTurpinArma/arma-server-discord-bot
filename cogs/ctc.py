@@ -876,7 +876,7 @@ class CTC(commands.Cog, name="ctc"):
                 return badge.name if badge else key
 
             embed.add_field(
-                name="Avg days to award",
+                name="Avg days to submit",
                 value="\n".join(
                     f"{badge_name(r['badge_key'])} — **{r['avg_days']}d** ({r['n']})"
                     for r in stats["turnaround"][:15]
@@ -1199,7 +1199,7 @@ class CTC(commands.Cog, name="ctc"):
             "claim": ("claimed", "claimed"),
             "release": ("requested", "released"),
             "complete": ("completed", "marked as run"),
-            "award": ("awarded", "awarded on taw.net"),
+            "award": ("awarded", "submitted on taw.net"),
             "cancel": ("cancelled", "cancelled"),
         }
         if action not in targets:
@@ -1237,7 +1237,8 @@ class CTC(commands.Cog, name="ctc"):
                 updated,
                 f"<@{updated['member_id']}> — "
                 f"**{self.catalogue_of(updated).label(updated['badge_key'], awarded)}**"
-                " is on your record. Congratulations. \N{MILITARY MEDAL}",
+                " has been submitted on taw.net. BATCOM will award it when they"
+                " can. Congratulations. \N{MILITARY MEDAL}",
             )
             # Close last — anything sent afterwards would reopen the thread.
             await self.close_thread(updated)
@@ -1473,7 +1474,7 @@ class CTC(commands.Cog, name="ctc"):
             await self._nudge(
                 row,
                 f"<@{row['instructor_id']}> — this was run {unawarded_hours}h ago but isn't "
-                "marked awarded on taw.net yet.",
+                "submitted on taw.net yet.",
                 user_id=row["instructor_id"],
             )
 

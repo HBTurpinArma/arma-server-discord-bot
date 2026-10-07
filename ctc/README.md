@@ -20,7 +20,7 @@ Member                          Instructor
                                [ Partial ] / [ Record result ]
                                   ↓
                                [ Open taw.net ]   ← the one manual step
-                               [ Awarded ] ──────→ done, thread archived
+                               [ Submitted ] ────→ done, thread archived
 ```
 
 ## Setup
@@ -70,7 +70,7 @@ ability:
 | `create_threads` | `true` | `false` posts cards in the channel instead. |
 | `private_threads` | `false` | `true` makes each request a private thread. See below. |
 | `hide_thread_notices` | `true` | Deletes Discord's "started a thread" message. Needs Manage Messages. |
-| `archive_on_award` | `true` | Archives the thread once awarded or cancelled. |
+| `archive_on_award` | `true` | Archives the thread once submitted or cancelled. |
 | `daily_bump` | `true` | Posts a silent line in open threads so they do not auto-archive. |
 | `bump_days` | `3` | How many days between those lines. Capped by the thread's own auto-archive window. |
 | `lock_on_award` | `false` | Also locks it, so only moderators can reopen. |
@@ -357,7 +357,7 @@ from Y to Z`), so a reassignment is not mistaken for the trainer having picked
 it up themselves. The person assigned is added to the thread, which matters on
 a private thread they were never part of.
 
-Awarded and cancelled requests cannot be assigned — there is nothing left to
+Submitted and cancelled requests cannot be assigned — there is nothing left to
 work on. Reopen first.
 
 ## Editing the catalogue
@@ -445,8 +445,12 @@ limits. No Discord connection required.
 
 ## Known limits
 
-- **taw.net is not integrated.** Awarding stays manual: the instructor gets a
-  deep link and one button to confirm. Three manual steps become one.
+- **taw.net is not integrated.** Submitting stays manual: the instructor gets
+  a deep link and one button to confirm. Three manual steps become one.
+- **The bot does not see the award itself.** The instructor submits on
+  taw.net and BATCOM awards it when they can, which happens outside Discord.
+  The queue therefore ends at submitted, and a request marked submitted is
+  not proof the badge has been granted.
 - **No prerequisite or duplicate checking** — the bot cannot see what a member
   already holds on the website.
 - **Badge history is not a record.** taw.net remains the source of truth; this
