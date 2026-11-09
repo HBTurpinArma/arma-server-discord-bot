@@ -17,6 +17,8 @@
 --                   can clear Basic and Advanced and fail Expert.
 -- `variant`         which form of the badge was run, for badges like Gun Range
 --                   that are run as Rifle, Pistol, SMG, Shotgun or HMG.
+-- `guest_instructor_*` a Guest TI working the request alongside the TI. The
+--                   two seats are claimed separately; either can finish it.
 
 CREATE TABLE IF NOT EXISTS `ctc_requests` (
   `id`               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +35,8 @@ CREATE TABLE IF NOT EXISTS `ctc_requests` (
   `status`           TEXT    NOT NULL DEFAULT 'requested',
   `instructor_id`    TEXT,
   `instructor_name`  TEXT,
+  `guest_instructor_id`   TEXT,
+  `guest_instructor_name` TEXT,
   `queue_channel_id` TEXT,
   `queue_message_id` TEXT,
   `thread_id`        TEXT,

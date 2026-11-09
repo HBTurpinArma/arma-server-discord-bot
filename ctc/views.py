@@ -15,6 +15,7 @@ from typing import Any
 
 import discord
 
+from . import guest_of
 from .catalogue import Badge, Catalogue
 
 # An action row holds 5 buttons or a single select, and a message holds 5 rows.
@@ -205,11 +206,12 @@ def ticket_embed(cat: Catalogue, row: Any, site_url: str = "") -> discord.Embed:
         embed.add_field(name="Run", value=row["variant"], inline=True)
 
     embed.add_field(name="Status", value=label, inline=True)
-    embed.add_field(
-        name="Instructor",
-        value=f"<@{row['instructor_id']}>" if row["instructor_id"] else "—",
-        inline=True,
-    )
+    lead = f"<@{row['instructor_id']}>" if row["instructor_id"] else "—"
+    guest = guest_of(row)
+    if guest:
+        embed.add_field(name="Instructors", value=f"{lead}\n<@{guest}> · Guest TI", inline=True)
+    else:
+        embed.add_field(name="Instructor", value=lead, inline=True)
     embed.add_field(name="Requested", value=relative(row["created_at"]), inline=True)
 
     if row["levels_achieved"] and requested and len(achieved) < len(requested):
@@ -235,7 +237,7 @@ def ticket_embed(cat: Catalogue, row: Any, site_url: str = "") -> discord.Embed:
 #: Ticket actions, named explicitly in the template. A loose ``[a-z]+`` would
 #: swallow any other ``ctc:*:*`` custom_id — the panel button did exactly that.
 TICKET_ACTIONS = (
-    "claim", "cancel", "release", "complete", "result", "award", "reopen", "assign",
+    "claim", "guest", "cancel", "release", "complete", "result", "award", "reopen", "assign",
 )
 
 
@@ -282,11 +284,16 @@ class TicketButton(
         await cog.handle_ticket_action(interaction, self.action, self.request_id)
 
 
-def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> discord.ui.View:
+def ticket_view(
+    cat: Catalogue, row: Any, *, award_url: str | None = None, guest_claim: bool = False
+) -> discord.ui.View:
     """Buttons appropriate to the ticket's current state.
 
     Every button is shown to everyone, as Discord has no per-viewer components;
     who may press what is enforced when it is pressed.
+
+    ``guest_claim`` offers the Guest TI's seat as well as the TI's, for a
+    battalion that has a Guest TI role configured.
     """
     view = discord.ui.View(timeout=None)
     rid = int(row["id"])
@@ -294,13 +301,20 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
     badge = cat.get(row["badge_key"])
     requested = cat.parse_levels(row["badge_key"], row["levels"])
 
-    if status == "requested":
-        view.add_item(
-            TicketButton(
-                "claim", rid, label="Claim",
-                style=discord.ButtonStyle.primary, emoji="\N{RAISED HAND}",
+    def claim_buttons() -> None:
+        # Each seat keeps its own Claim until someone takes it.
+        if not row["instructor_id"]:
+            view.add_item(
+                TicketButton(
+                    "claim", rid, label="Claim",
+                    style=discord.ButtonStyle.primary, emoji="\N{RAISED HAND}",
+                )
             )
-        )
+        if guest_claim and not guest_of(row):
+            view.add_item(TicketButton("guest", rid, label="Claim as Guest TI"))
+
+    if status == "requested":
+        claim_buttons()
         view.add_item(TicketButton("cancel", rid, label="Cancel"))
         view.add_item(TicketButton("assign", rid, label="Assign…"))
 
@@ -326,6 +340,7 @@ def ticket_view(cat: Catalogue, row: Any, *, award_url: str | None = None) -> di
                 view.add_item(
                     TicketButton("result", rid, label="Partial", emoji="\N{WARNING SIGN}")
                 )
+        claim_buttons()
         view.add_item(TicketButton("release", rid, label="Release"))
         view.add_item(TicketButton("assign", rid, label="Reassign…"))
         view.add_item(TicketButton("cancel", rid, label="Cancel", style=discord.ButtonStyle.danger))
@@ -365,19 +380,14 @@ class AssignView(discord.ui.View):
         self.cog = cog
         self.row = row
         self.unit = cog.unit_of(row)
-        current = row["instructor_id"]
-        self.add_item(
-            _AssignSelect(
-                self,
-                default=[
-                    discord.SelectDefaultValue(
-                        id=int(current), type=discord.SelectDefaultValueType.user
-                    )
-                ]
-                if current
-                else [],
-            )
-        )
+        self.add_item(_AssignSelect(self, default=_preselect(row["instructor_id"])))
+        self.add_item(_GuestSelect(self, default=_preselect(guest_of(row))))
+
+
+def _preselect(user_id: str | None) -> list[discord.SelectDefaultValue]:
+    if not user_id:
+        return []
+    return [discord.SelectDefaultValue(id=int(user_id), type=discord.SelectDefaultValueType.user)]
 
 
 class _AssignSelect(discord.ui.UserSelect):
@@ -393,6 +403,24 @@ class _AssignSelect(discord.ui.UserSelect):
     async def callback(self, interaction: discord.Interaction) -> None:
         await self.parent_view.cog.assign_request(
             interaction, self.parent_view.row, self.values[0]
+        )
+
+
+class _GuestSelect(discord.ui.UserSelect):
+    """The Guest TI's seat. Optional, so clearing the box takes them off."""
+
+    def __init__(self, parent: AssignView, default: list) -> None:
+        super().__init__(
+            placeholder="Guest TI alongside them (optional)",
+            min_values=0,
+            max_values=1,
+            default_values=default,
+        )
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.cog.assign_guest_request(
+            interaction, self.parent_view.row, self.values[0] if self.values else None
         )
 
 

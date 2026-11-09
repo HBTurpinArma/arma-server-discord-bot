@@ -927,6 +927,144 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             assert labels(finished) == ["Reopen for re-run", "Cancel"]
             assert "Already marked" in finished.content()
 
+        async def new_request(member: str) -> int:
+            rows = await db.create_group(
+                guild_id="g", unit="default", member_id=member, member_name=member, notes=None,
+                items=[("cqc", [])],
+            )
+            return rows[0]["id"]
+
+        async def two_seats_claim_separately():
+            rid = await new_request("g1")
+            r = await db.claim(rid, instructor_id="guest1", instructor_name="Guest", guest=True)
+            assert r["status"] == "claimed", "a Guest TI alone takes it out of the queue"
+            assert r["instructor_id"] is None and r["guest_instructor_id"] == "guest1"
+            first_claim = r["claimed_at"]
+
+            r = await db.claim(rid, instructor_id="ti1", instructor_name="Sgt")
+            assert r["instructor_id"] == "ti1" and r["guest_instructor_id"] == "guest1"
+            assert r["claimed_at"] == first_claim, "the first claim's time is kept"
+
+            for kwargs, why in (
+                ({"instructor_id": "ti2", "instructor_name": "Cpl"}, "TI seat stolen"),
+                ({"instructor_id": "guest2", "instructor_name": "G2", "guest": True},
+                 "Guest TI seat stolen"),
+                ({"instructor_id": "ti1", "instructor_name": "Sgt", "guest": True},
+                 "one person in both seats"),
+            ):
+                try:
+                    await db.claim(rid, **kwargs)
+                except TransitionError:
+                    pass
+                else:
+                    raise AssertionError(why)
+
+            # Finishing works as before, with both seats left on the record.
+            r = await db.transition(rid, "completed", levels_achieved=["E"])
+            assert r["guest_instructor_id"] == "guest1" and r["instructor_id"] == "ti1"
+            try:
+                await db.claim(rid, instructor_id="guest3", instructor_name="G3", guest=True)
+            except TransitionError:
+                pass
+            else:
+                raise AssertionError("nobody joins work that has already been run")
+
+        async def release_frees_one_seat():
+            rid = await new_request("g2")
+            await db.claim(rid, instructor_id="ti1", instructor_name="Sgt")
+            await db.claim(rid, instructor_id="guest1", instructor_name="Guest", guest=True)
+
+            r, seat = await db.release(rid, actor_id="guest1")
+            assert seat == "guest_instructor", "a Guest TI releases their own seat"
+            assert r["status"] == "claimed" and r["instructor_id"] == "ti1"
+            assert r["guest_instructor_id"] is None
+
+            await db.claim(rid, instructor_id="guest1", instructor_name="Guest", guest=True)
+            r, seat = await db.release(rid, actor_id="someone-else")
+            assert seat == "instructor", "anyone else frees the TI's seat first"
+            assert r["status"] == "claimed", "the Guest TI still holds it"
+
+            r, seat = await db.release(rid, actor_id="guest1")
+            assert r["status"] == "requested" and r["claimed_at"] is None, "empty means queued"
+
+        async def guest_can_be_assigned_and_cleared():
+            rid = await new_request("g3")
+            r = await db.assign_guest(rid, guest_id="guest1", guest_name="Guest")
+            assert r["status"] == "claimed" and r["guest_instructor_id"] == "guest1"
+            r = await db.assign(rid, instructor_id="ti1", instructor_name="Sgt")
+            assert r["instructor_id"] == "ti1" and r["guest_instructor_id"] == "guest1"
+
+            for call, why in (
+                (db.assign_guest(rid, guest_id="ti1", guest_name="Sgt"), "TI as their own guest"),
+                (db.assign(rid, instructor_id="guest1", instructor_name="Guest"),
+                 "Guest TI also seated as TI"),
+            ):
+                try:
+                    await call
+                except TransitionError:
+                    pass
+                else:
+                    raise AssertionError(why)
+
+            r = await db.assign_guest(rid, guest_id=None, guest_name=None)
+            assert r["guest_instructor_id"] is None and r["status"] == "claimed"
+
+            rid = await new_request("g4")
+            await db.assign_guest(rid, guest_id="guest1", guest_name="Guest")
+            r = await db.assign_guest(rid, guest_id=None, guest_name=None)
+            assert r["status"] == "requested", "clearing the only person queues it again"
+
+        async def guest_reopening_keeps_the_seats():
+            rid = await new_request("g5")
+            await db.claim(rid, instructor_id="ti1", instructor_name="Sgt")
+            await db.claim(rid, instructor_id="guest1", instructor_name="Guest", guest=True)
+            await db.transition(rid, "completed", levels_achieved=["E"])
+            r = await db.reopen(rid, instructor_id="guest1", instructor_name="Guest")
+            assert r["instructor_id"] == "ti1", "a Guest TI reopening does not take the TI seat"
+            assert r["guest_instructor_id"] == "guest1"
+
+        async def guest_counts_in_stats():
+            report = await db.stats()
+            names = {r["name"] for r in report["by_instructor"]}
+            assert "Guest" in names, "Guest TI work is missing from instructor load"
+
+        async def cards_show_both_seats():
+            row = dict(await db.by_id(await new_request("g6")))
+            assert labels(ticket_view(CAT, row)) == ["Claim", "Cancel", "Assign…"], (
+                "no Guest TI role configured, no guest button"
+            )
+            assert labels(ticket_view(CAT, row, guest_claim=True))[:2] == [
+                "Claim", "Claim as Guest TI"
+            ]
+
+            row.update(status="claimed", instructor_id="111", guest_instructor_id=None)
+            claimed = labels(ticket_view(CAT, row, guest_claim=True))
+            assert "Claim as Guest TI" in claimed and "Claim" not in claimed
+
+            row.update(instructor_id=None, guest_instructor_id="222")
+            view = ticket_view(CAT, row, guest_claim=True)
+            assert_component_limits(view, "guest-only claim")
+            assert "Claim" in labels(view) and "Claim as Guest TI" not in labels(view)
+
+            row.update(instructor_id="111")
+            both = labels(ticket_view(CAT, row, guest_claim=True))
+            assert not {"Claim", "Claim as Guest TI"} & set(both), "both seats are taken"
+            fields = {f.name: f.value for f in ticket_embed(CAT, row).fields}
+            assert fields["Instructors"] == "<@111>\n<@222> · Guest TI", fields
+
+            # An old row without the column still renders.
+            legacy = {k: v for k, v in row.items() if not k.startswith("guest_")}
+            assert "Instructor" in {f.name for f in ticket_embed(CAT, legacy).fields}
+            ticket_view(CAT, legacy, guest_claim=True)
+
+            from ctc.views import AssignView
+
+            assign = AssignView(FakeCog(CAT), row)
+            assert_component_limits(assign, "assign with guest")
+            guest_box = selects(assign)[1]
+            assert guest_box.min_values == 0, "the Guest TI box must be clearable"
+            assert [d.id for d in guest_box.default_values] == [222]
+
         for name, fn in [
             ("one badge is one ticket, however many levels", one_ticket_per_badge),
             ("the happy path walks requested to awarded", happy_path),
@@ -949,6 +1087,13 @@ async def lifecycle() -> list[tuple[str, Exception | None]]:
             ("a partial result is spelled out on the card", partial_card_spells_it_out),
             ("the result form adapts to badge kind", result_view_shapes),
             ("the amend form offers the full ladder", amend_view_shapes),
+            ("the TI and Guest TI seats are claimed separately", two_seats_claim_separately),
+            ("release frees one seat, and only an empty request is queued",
+             release_frees_one_seat),
+            ("a Guest TI can be assigned and taken off", guest_can_be_assigned_and_cleared),
+            ("a Guest TI reopening leaves the TI seat alone", guest_reopening_keeps_the_seats),
+            ("Guest TI work counts in instructor load", guest_counts_in_stats),
+            ("the card shows both seats and the right Claim buttons", cards_show_both_seats),
         ]:
             await step(name, fn)
 
@@ -1800,6 +1945,209 @@ def _() -> None:
     cog2.units = loose
     assert cog2.is_manager(loose.require("am2"), me)
 
+
+
+@check("a claim the card missed is redrawn, however the press ends")
+def _() -> None:
+    from types import SimpleNamespace
+
+    from cogs.ctc import CTC
+
+    INSTRUCTOR = 42
+    HOLDER = "189362064995778560"
+
+    class FakeRequests:
+        def __init__(self, **row) -> None:
+            self.row = {
+                "id": 83, "unit": "default", "badge_key": "cqc", "levels": None,
+                "levels_achieved": None, "variant": None, "status": "requested",
+                "member_id": "5", "instructor_id": None, "instructor_name": None,
+                "created_at": "2026-10-26 01:51:00", "notes": None, "thread_id": None,
+                "queue_channel_id": "1", "queue_message_id": "2", **row,
+            }
+
+        async def by_id(self, request_id):
+            return dict(self.row)
+
+        async def claim(self, request_id, *, instructor_id, instructor_name, guest=False):
+            if self.row["instructor_id"]:
+                raise TransitionError(f"Request #{request_id} is already claimed.")
+            self.row.update(status="claimed", instructor_id=instructor_id,
+                            instructor_name=instructor_name)
+            return dict(self.row)
+
+    class FakeResponse:
+        def __init__(self, fail=None) -> None:
+            self.fail = fail
+            self.sent: list[str] = []
+            self.edited = 0
+
+        async def send_message(self, content, **_):
+            if self.fail:
+                raise self.fail
+            self.sent.append(content)
+
+        async def edit_message(self, **_):
+            if self.fail:
+                raise self.fail
+            self.edited += 1
+
+    def press(requests, fail=None):
+        cog = CTC.__new__(CTC)
+        cog.units = Units({}, DEFAULTS)
+        cog.database = requests
+        cog.bot = SimpleNamespace(logger=SimpleNamespace(warning=lambda _msg: None))
+        cog.can_work_row = lambda user, row: True
+        cog.catalogue_of = lambda row: CAT
+        cog.settings_of = lambda row: DEFAULTS
+        redrawn, posted = [], []
+
+        async def refresh_ticket(row):
+            redrawn.append(row)
+
+        async def post_to_thread(row, content):
+            posted.append(content)
+
+        cog.refresh_ticket = refresh_ticket
+        cog.post_to_thread = post_to_thread
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=INSTRUCTOR, display_name="Instructor"),
+            response=FakeResponse(fail),
+        )
+        asyncio.run(cog.handle_ticket_action(interaction, "claim", 83))
+        return interaction.response, redrawn, posted
+
+    # The normal path edits the card through the reply, nothing else.
+    response, redrawn, posted = press(FakeRequests())
+    assert response.edited == 1 and not redrawn, "a clean claim should not redraw twice"
+    assert posted, "the claim should still be announced in the thread"
+
+    # Saved, but the reply was refused: the card must still change.
+    expired = discord.NotFound(
+        SimpleNamespace(status=404, reason="Not Found"),
+        {"code": 10062, "message": "Unknown interaction"},
+    )
+    requests = FakeRequests()
+    response, redrawn, posted = press(requests, fail=expired)
+    assert requests.row["status"] == "claimed"
+    assert [r["status"] for r in redrawn] == ["claimed"], "card left showing Claim"
+    assert posted, "a refused reply must not swallow the thread notice"
+
+    # A press on a card that missed an earlier claim heals it and names the holder.
+    response, redrawn, posted = press(
+        FakeRequests(status="claimed", instructor_id=HOLDER, instructor_name="Spotless")
+    )
+    assert response.sent and f"<@{HOLDER}>" in response.sent[0], response.sent
+    assert [r["status"] for r in redrawn] == ["claimed"], "stale card not redrawn"
+    assert not posted, "a refused press is not news for the thread"
+
+
+@check("a Guest TI works their own ticket but cannot take the TI seat")
+def _() -> None:
+    from types import SimpleNamespace
+
+    from cogs.ctc import CTC
+
+    TI_ROLE, GUEST_ROLE = 1001588316602368090, 1001589735581552731
+    cog = CTC.__new__(CTC)
+    cog.units = Units(
+        {"instructor_role_id": TI_ROLE, "guest_instructor_role_id": GUEST_ROLE}, DEFAULTS
+    )
+    unit = cog.units.require("default")
+    ti, guest, nobody = FakeMember(10, [TI_ROLE]), FakeMember(20, [GUEST_ROLE]), FakeMember(30)
+    row = {"id": 9, "unit": "default", "badge_key": "cqc", "member_id": "5",
+           "status": "claimed", "instructor_id": "10", "guest_instructor_id": "20"}
+
+    assert cog.is_guest_instructor(unit, guest) and not cog.is_guest_instructor(unit, ti)
+    assert not cog.can_work(unit, guest, "cqc"), "the Guest TI role alone is not a TI"
+    assert cog.can_work_row(guest, row), "a seated Guest TI works their own ticket"
+    assert not cog.can_work_row(guest, {**row, "guest_instructor_id": None})
+    assert not cog.can_work_row(nobody, row)
+
+    sent: list[str] = []
+
+    async def send_message(content, **_):
+        sent.append(content)
+
+    async def by_id(_rid):
+        return {**row, "status": "requested", "instructor_id": None, "guest_instructor_id": None}
+
+    cog.database = SimpleNamespace(by_id=by_id)
+    interaction = SimpleNamespace(user=guest, response=SimpleNamespace(send_message=send_message))
+    asyncio.run(cog.handle_ticket_action(interaction, "claim", 9))
+    assert sent and "Claim as Guest TI" in sent[0], sent
+
+    sent.clear()
+    interaction.user = ti
+    asyncio.run(cog.handle_ticket_action(interaction, "guest", 9))
+    assert sent == ["Only Guest TIs can take the Guest TI seat."], sent
+
+
+@check("a press on a submitted request whose card stuck closes its thread")
+def _() -> None:
+    from types import SimpleNamespace
+
+    from cogs.ctc import CTC
+
+    # Request #23: submitted on taw.net, but the card still offered the button
+    # because the reply to that press was refused.
+    row = {"id": 23, "unit": "default", "badge_key": "gun_range", "levels": None,
+           "levels_achieved": "A", "variant": "Rifle", "status": "awarded",
+           "member_id": "5", "instructor_id": "10", "guest_instructor_id": None,
+           "thread_id": "77", "queue_channel_id": "77", "queue_message_id": "78"}
+
+    def press(thread_already_closed: bool):
+        cog = CTC.__new__(CTC)
+        cog.units = Units({}, DEFAULTS)
+        redrawn, posted, closed = [], [], []
+
+        async def by_id(_rid):
+            return dict(row)
+
+        async def transition(rid, nxt, **_):
+            raise TransitionError(f"Request #{rid} is already {nxt}.")
+
+        async def refresh_ticket(r):
+            redrawn.append(r["status"])
+
+        async def post_to_thread(r, content):
+            posted.append(content)
+
+        async def close_thread(r):
+            closed.append(r["id"])
+
+        async def thread_closed(r):
+            return thread_already_closed
+
+        async def send_message(content, **_):
+            pass
+
+        cog.database = SimpleNamespace(by_id=by_id, transition=transition)
+        cog.refresh_ticket, cog.post_to_thread = refresh_ticket, post_to_thread
+        cog.close_thread, cog.thread_closed = close_thread, thread_closed
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=10, display_name="Spotless"),
+            response=SimpleNamespace(send_message=send_message),
+        )
+        asyncio.run(cog.handle_ticket_action(interaction, "award", 23))
+        return redrawn, posted, closed
+
+    redrawn, posted, closed = press(thread_already_closed=False)
+    assert redrawn == ["awarded"], "the stuck card is redrawn"
+    assert len(posted) == 1 and "submitted on taw.net" in posted[0], posted
+    assert closed == [23], "the thread that never closed is closed now"
+
+    redrawn, posted, closed = press(thread_already_closed=True)
+    assert redrawn == ["awarded"] and not posted and not closed, (
+        "a thread that did close must not be congratulated twice"
+    )
+
+
+@check("guest is a real ticket action and survives a restart")
+def _() -> None:
+    pattern = TicketButton.__discord_ui_compiled_template__
+    assert pattern.fullmatch("ctc:guest:42")
+    assert not pattern.fullmatch(PANEL_CUSTOM_ID)
 
 
 @check("panels redraw on startup, so config changes reach them")

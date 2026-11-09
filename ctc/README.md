@@ -60,6 +60,7 @@ ability:
 | --- | --- | --- |
 | `queue_channel_id` | — | Where request threads are created. Required. |
 | `instructor_role_id` | `0` | Claim/complete/award, and the queue and stats commands. **`0` means anyone**, for local testing only. |
+| `guest_instructor_role_id` | `0` | Guest TIs, who can claim a request's second seat next to its TI. `0` hides **Claim as Guest TI**; see [Guest TIs](#guest-tis). |
 | `config_role_id` | `0` | Who may edit the catalogue. `0` falls back to the Manage Server permission. |
 | `assign_role_id` | `0` | Who may set who is working on a request. `0` falls back to the instructor roles. |
 | `member_role_id` | `0` | Who may raise a request with this unit. `0` means anyone. Staff can always request. |
@@ -359,6 +360,29 @@ a private thread they were never part of.
 
 Submitted and cancelled requests cannot be assigned — there is nothing left to
 work on. Reopen first.
+
+### Guest TIs
+
+A request has two seats: the TI's and a Guest TI's. Each is claimed on its
+own, so a Guest TI can join work a TI already holds, or pick it up first and be
+joined later. The card lists both under **Instructors**.
+
+- **Claim as Guest TI** sits next to **Claim** while the Guest TI seat is
+  empty. It appears only when `guest_instructor_role_id` is set, and only
+  holders of that role (and division staff) can press it. **Claim** still needs
+  a real instructor.
+- **Assign…** has a second, optional box for the Guest TI. Clearing it takes
+  them off. Anyone can be seated there this way, role or not.
+- Once seated, a Guest TI works the ticket exactly like its TI: record the
+  result, mark it run, submit on taw.net, release, cancel. Either can finish it,
+  and the taw.net chase-up pings both.
+- **Release** frees the presser's own seat; anyone else releasing frees the TI's
+  seat first. The request only goes back to the queue once both are empty.
+- Guest TI work counts in `/badge stats`.
+
+On a private thread, give the Guest TI role Manage Threads on the queue channel
+(as instructors have) or they will not see cards to claim. Seating someone
+through **Assign…** adds them to the thread either way.
 
 ## Editing the catalogue
 

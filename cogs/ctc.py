@@ -24,7 +24,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from ctc import CTCDatabaseManager, TransitionError
+from ctc import CTCDatabaseManager, TransitionError, guest_of, instructors_of
 from ctc import catalogue as catalogue_module
 from ctc.config_views import ConfigRootView
 from ctc.units import Unit, Units
@@ -52,6 +52,9 @@ SCHEMA_PATH = os.path.join(PACKAGE_DIR, "schema.sql")
 DEFAULTS: dict[str, Any] = {
     "queue_channel_id": 0,
     "instructor_role_id": 0,
+    # Guest TIs take a request's second seat, next to its TI. Unset hides the
+    # Claim as Guest TI button; Assign… can still seat anyone as Guest TI.
+    "guest_instructor_role_id": 0,
     "config_role_id": 0,
     "panel_role_id": 0,
     "taw_award_url": "",
@@ -83,6 +86,8 @@ LATER_COLUMNS: dict[str, dict[str, str]] = {
         "nudge_message_id": "TEXT",
         "nudge_channel_id": "TEXT",
         "unit": "TEXT",
+        "guest_instructor_id": "TEXT",
+        "guest_instructor_name": "TEXT",
     },
     "ctc_panels": {"unit": "TEXT"},
 }
@@ -370,8 +375,21 @@ class CTC(commands.Cog, name="ctc"):
         return self.is_instructor(unit, user) or self.is_extra_trainer(unit, user, badge_key)
 
     def can_work_row(self, user: discord.abc.User, row: Any) -> bool:
-        """As above, for a ticket that already knows its own battalion."""
-        return self.can_work(self.unit_of(row), user, row["badge_key"])
+        """As above, for a ticket that already knows its own battalion.
+
+        The ticket's own Guest TI counts too: seated on it, they work it like
+        its TI, whatever roles they hold.
+        """
+        return (
+            self.can_work(self.unit_of(row), user, row["badge_key"])
+            or guest_of(row) == str(user.id)
+        )
+
+    def is_guest_instructor(self, unit: Unit, user: discord.abc.User) -> bool:
+        """Who may take a request's Guest TI seat themselves."""
+        return self.is_manager(unit, user) or self.holds_any(
+            unit, user, "guest_instructor_role_id"
+        )
 
     def can_request(self, unit: Unit, user: discord.abc.User) -> bool:
         """Who may raise a request with this battalion.
@@ -494,10 +512,8 @@ class CTC(commands.Cog, name="ctc"):
             is_forum = isinstance(channel, discord.ForumChannel)
             role_ids = self.role_ids(unit, "instructor_role_id")
             base_pings = [f"<@&{i}>" for i in role_ids]
-            embed = ticket_embed(cat, row, settings["site_url"])
-            view = ticket_view(
-                cat, row, award_url=settings["taw_award_url"] or None
-            )
+            card = self.card(row)
+            embed, view = card["embed"], card["view"]
             # Member first — the channel sorts into a readable list of who is
             # waiting on what. Levels abbreviated to keep the name scannable;
             # the card inside spells them out in full.
@@ -599,6 +615,19 @@ class CTC(commands.Cog, name="ctc"):
         except discord.HTTPException as error:
             self.bot.logger.warning(f"CTC: could not hide thread notice: {error}")
 
+    def card(self, row: Any) -> dict[str, Any]:
+        """The ticket card's embed and buttons, ready to pass to send or edit."""
+        settings = self.settings_of(row)
+        return {
+            "embed": ticket_embed(self.catalogue_of(row), row, settings["site_url"]),
+            "view": ticket_view(
+                self.catalogue_of(row),
+                row,
+                award_url=settings["taw_award_url"] or None,
+                guest_claim=bool(settings.get("guest_instructor_role_id")),
+            ),
+        }
+
     async def refresh_ticket(self, row: Any) -> None:
         if not row["queue_channel_id"] or not row["queue_message_id"]:
             return
@@ -607,16 +636,7 @@ class CTC(commands.Cog, name="ctc"):
                 int(row["queue_channel_id"])
             )
             message = await channel.fetch_message(int(row["queue_message_id"]))
-            await message.edit(
-                embed=ticket_embed(
-                    self.catalogue_of(row), row, self.settings_of(row)["site_url"]
-                ),
-                view=ticket_view(
-                    self.catalogue_of(row),
-                    row,
-                    award_url=self.settings_of(row)["taw_award_url"] or None,
-                ),
-            )
+            await message.edit(**self.card(row))
         except discord.HTTPException as error:
             self.bot.logger.warning(f"CTC: could not refresh #{row['id']}: {error}")
 
@@ -773,11 +793,11 @@ class CTC(commands.Cog, name="ctc"):
 
         def is_mine(entry) -> bool:
             _, row = entry
-            return bool(row and row["instructor_id"] == str(interaction.user.id))
+            return bool(row and str(interaction.user.id) in instructors_of(row))
 
         def is_unclaimed(entry) -> bool:
             _, row = entry
-            return bool(row and not row["instructor_id"])
+            return bool(row and not instructors_of(row))
 
         if not mine and not open:
             filtered = entries
@@ -799,7 +819,7 @@ class CTC(commands.Cog, name="ctc"):
             if row is None:
                 return f"\N{WHITE SMALL SQUARE} {thread.mention} *(no matching request)*"
             _, emoji, _ = style_for(row["status"])
-            who = f" · <@{row['instructor_id']}>" if row["instructor_id"] else ""
+            who = "".join(f" · <@{i}>" for i in instructors_of(row))
             return (
                 f"{emoji} {thread.mention} — <@{row['member_id']}>{who} · "
                 f"{relative(row['created_at'])}"
@@ -1153,19 +1173,32 @@ class CTC(commands.Cog, name="ctc"):
             )
             return
 
+        unit = self.unit_of(row)
         own_cancel = action == "cancel" and row["member_id"] == str(interaction.user.id)
-        if not own_cancel and not self.can_work_row(interaction.user, row):
-            await interaction.response.send_message(
-                "Only Training Instructors can do that.", ephemeral=True
-            )
+        if action == "claim":
+            # The TI's seat needs a real instructor; being this ticket's Guest
+            # TI is not enough to take the other seat as well.
+            allowed = self.can_work(unit, interaction.user, row["badge_key"])
+        elif action == "guest":
+            allowed = self.is_guest_instructor(unit, interaction.user)
+        else:
+            allowed = own_cancel or self.can_work_row(interaction.user, row)
+        if not allowed:
+            if action == "guest":
+                denied = "Only Guest TIs can take the Guest TI seat."
+            elif action == "claim" and self.is_guest_instructor(unit, interaction.user):
+                denied = "Only Training Instructors can do that. Use **Claim as Guest TI** instead."
+            else:
+                denied = "Only Training Instructors can do that."
+            await interaction.response.send_message(denied, ephemeral=True)
             return
 
         # Whoever claimed it owns it, though any instructor can release it.
-        if action in ("complete", "result", "award") and row["instructor_id"] != str(
-            interaction.user.id
-        ):
+        working = instructors_of(row)
+        if action in ("complete", "result", "award") and str(interaction.user.id) not in working:
+            holders = " and ".join(f"<@{i}>" for i in working) or "nobody"
             await interaction.response.send_message(
-                f"This is claimed by <@{row['instructor_id']}>. Ask them to release it first.",
+                f"This is claimed by {holders}. Ask them to release it first.",
                 ephemeral=True,
             )
             return
@@ -1196,54 +1229,99 @@ class CTC(commands.Cog, name="ctc"):
             return
 
         targets = {
-            "claim": ("claimed", "claimed"),
-            "release": ("requested", "released"),
-            "complete": ("completed", "marked as run"),
-            "award": ("awarded", "submitted on taw.net"),
-            "cancel": ("cancelled", "cancelled"),
+            "complete": ("completed", "marked this request as run"),
+            "award": ("awarded", "submitted this request on taw.net"),
+            "cancel": ("cancelled", "cancelled this request"),
         }
-        if action not in targets:
+        if action not in (*targets, "claim", "guest", "release"):
             await interaction.response.send_message("Unknown action.", ephemeral=True)
             return
 
-        nxt, verb = targets[action]
         name = getattr(interaction.user, "display_name", str(interaction.user))
         try:
-            updated = await self.database.transition(
-                request_id,
-                nxt,
-                instructor_id=str(interaction.user.id) if nxt == "claimed" else None,
-                instructor_name=name if nxt == "claimed" else None,
-            )
+            if action in ("claim", "guest"):
+                updated = await self.database.claim(
+                    request_id,
+                    instructor_id=str(interaction.user.id),
+                    instructor_name=name,
+                    guest=action == "guest",
+                )
+                verb = "claimed this request" if action == "claim" else "joined as Guest TI"
+            elif action == "release":
+                updated, seat = await self.database.release(
+                    request_id, actor_id=str(interaction.user.id)
+                )
+                verb = (
+                    "released this request" if seat == "instructor" else "freed the Guest TI seat"
+                )
+            else:
+                nxt, verb = targets[action]
+                updated = await self.database.transition(request_id, nxt)
         except TransitionError as error:
-            await interaction.response.send_message(f"\N{WARNING SIGN} {error}", ephemeral=True)
+            # A press the database refuses came off a card that no longer
+            # matches it, so redraw the card and say who has the work.
+            current = await self.database.by_id(request_id)
+            message = f"\N{WARNING SIGN} {error}"
+            holders = instructors_of(current) if current is not None else []
+            if holders:
+                message += f" It is with {' and '.join(f'<@{i}>' for i in holders)}."
+            with contextlib.suppress(discord.HTTPException):
+                await interaction.response.send_message(message, ephemeral=True)
+            if current is not None:
+                await self.refresh_ticket(current)
+                # A finished request whose card was still live never got its
+                # last steps either: the member was not told and the thread
+                # stayed open. Do them now.
+                if current["status"] in ("awarded", "cancelled") and not (
+                    await self.thread_closed(current)
+                ):
+                    await self.finish_request(current)
             return
 
-        await interaction.response.edit_message(
-            embed=ticket_embed(
-                self.catalogue_of(updated), updated, self.settings_of(updated)["site_url"]
-            ),
-            view=ticket_view(
-                self.catalogue_of(updated),
-                updated,
-                award_url=self.settings_of(updated)["taw_award_url"] or None,
-            ),
-        )
-        await self.post_to_thread(updated, f"<@{interaction.user.id}> {verb} this request.")
+        try:
+            await interaction.response.edit_message(**self.card(updated))
+        except discord.HTTPException as error:
+            # The change is already saved. If Discord refuses the reply (the
+            # press timed out, or another copy of the bot answered first) the
+            # card would keep offering Claim on work that is already taken, so
+            # redraw it directly instead.
+            self.bot.logger.warning(
+                f"CTC: could not answer {action} on #{request_id}, redrawing the card: {error}"
+            )
+            await self.refresh_ticket(updated)
+        await self.post_to_thread(updated, f"<@{interaction.user.id}> {verb}.")
+        await self.finish_request(updated)
 
-        if updated["status"] == "awarded":
-            awarded = updated["levels_achieved"] or updated["levels"]
+    async def finish_request(self, row: Any) -> None:
+        """Tell the member a submitted badge is on its way, then close the thread.
+
+        Does nothing for a request that is still open.
+        """
+        if row["status"] == "awarded":
+            awarded = row["levels_achieved"] or row["levels"]
             await self.post_to_thread(
-                updated,
-                f"<@{updated['member_id']}> — "
-                f"**{self.catalogue_of(updated).label(updated['badge_key'], awarded)}**"
+                row,
+                f"<@{row['member_id']}> — "
+                f"**{self.catalogue_of(row).label(row['badge_key'], awarded)}**"
                 " has been submitted on taw.net. BATCOM will award it when they"
                 " can. Congratulations. \N{MILITARY MEDAL}",
             )
             # Close last — anything sent afterwards would reopen the thread.
-            await self.close_thread(updated)
-        elif updated["status"] == "cancelled":
-            await self.close_thread(updated)
+            await self.close_thread(row)
+        elif row["status"] == "cancelled":
+            await self.close_thread(row)
+
+    async def thread_closed(self, row: Any) -> bool:
+        """True if the request's thread already carries the closed prefix, or is gone."""
+        if not row["thread_id"]:
+            return True
+        try:
+            thread = self.bot.get_channel(int(row["thread_id"])) or await self.bot.fetch_channel(
+                int(row["thread_id"])
+            )
+        except discord.HTTPException:
+            return True
+        return thread.name.startswith(CLOSED_PREFIX)
 
     async def assign_request(
         self, interaction: discord.Interaction, row: Any, member: discord.abc.User
@@ -1282,15 +1360,62 @@ class CTC(commands.Cog, name="ctc"):
         else:
             note = f"<@{interaction.user.id}> assigned this to {member.mention}."
         await self.post_to_thread(updated, note)
+        await self.add_to_thread(updated, member)
 
-        # A private thread is invisible to someone who was never added to it,
-        # and being handed the work is exactly when that matters.
-        if updated["thread_id"]:
-            with contextlib.suppress(discord.HTTPException):
-                thread = self.bot.get_channel(
-                    int(updated["thread_id"])
-                ) or await self.bot.fetch_channel(int(updated["thread_id"]))
-                await thread.add_user(discord.Object(id=int(member.id)))
+    async def assign_guest_request(
+        self, interaction: discord.Interaction, row: Any, member: discord.abc.User | None
+    ) -> None:
+        """Seat a Guest TI next to the TI on someone else's behalf, or clear the seat."""
+        if not self.can_assign(self.unit_of(row), interaction.user):
+            await interaction.response.edit_message(
+                content="You cannot set who is working on a request.", view=None
+            )
+            return
+
+        previous = guest_of(row)
+        try:
+            updated = await self.database.assign_guest(
+                int(row["id"]),
+                guest_id=str(member.id) if member else None,
+                guest_name=getattr(member, "display_name", str(member)) if member else None,
+            )
+        except TransitionError as error:
+            await interaction.response.edit_message(
+                content=f"\N{WARNING SIGN} {error}", view=None
+            )
+            return
+
+        await interaction.response.edit_message(
+            content=f"{member.mention} is Guest TI." if member else "Guest TI removed.",
+            view=None,
+        )
+        await self.refresh_ticket(updated)
+
+        actor = f"<@{interaction.user.id}>"
+        if member is None:
+            note = f"{actor} took <@{previous}> off as Guest TI." if previous else None
+        elif previous and previous != str(member.id):
+            note = f"{actor} made {member.mention} Guest TI in place of <@{previous}>."
+        else:
+            note = f"{actor} added {member.mention} as Guest TI."
+        if note:
+            await self.post_to_thread(updated, note)
+        if member is not None:
+            await self.add_to_thread(updated, member)
+
+    async def add_to_thread(self, row: Any, member: discord.abc.User) -> None:
+        """Add someone handed the work to its thread.
+
+        A private thread is invisible to someone who was never added to it,
+        and being handed the work is exactly when that matters.
+        """
+        if not row["thread_id"]:
+            return
+        with contextlib.suppress(discord.HTTPException):
+            thread = self.bot.get_channel(int(row["thread_id"])) or await self.bot.fetch_channel(
+                int(row["thread_id"])
+            )
+            await thread.add_user(discord.Object(id=int(member.id)))
 
     async def record_result(self, interaction: discord.Interaction, view: ResultView) -> None:
         try:
@@ -1471,11 +1596,13 @@ class CTC(commands.Cog, name="ctc"):
     async def _nudge_unawarded(self, unit: Unit) -> None:
         unawarded_hours = int(unit.settings["nudge_unawarded_hours"])
         for row in await self.database.stale("completed", unawarded_hours, unit=unit.key):
+            # Either seat can submit it, so both are chased.
+            working = instructors_of(row)
             await self._nudge(
                 row,
-                f"<@{row['instructor_id']}> — this was run {unawarded_hours}h ago but isn't "
-                "submitted on taw.net yet.",
-                user_id=row["instructor_id"],
+                f"{' '.join(f'<@{i}>' for i in working)} — this was run {unawarded_hours}h ago "
+                "but isn't submitted on taw.net yet.",
+                user_ids=working,
             )
 
     async def _nudge(
@@ -1484,7 +1611,7 @@ class CTC(commands.Cog, name="ctc"):
         content: str,
         *,
         role_ids: Sequence[int] = (),
-        user_id: str | None = None,
+        user_ids: Sequence[str] = (),
     ) -> bool:
         """Chase a request once, replacing the last chase-up for the same row.
 
@@ -1496,7 +1623,7 @@ class CTC(commands.Cog, name="ctc"):
         """
         allowed = discord.AllowedMentions(
             roles=[discord.Object(id=i) for i in role_ids] if role_ids else False,
-            users=[discord.Object(id=int(user_id))] if user_id else False,
+            users=[discord.Object(id=int(i)) for i in user_ids] if user_ids else False,
         )
         for channel_id in (row["thread_id"], row["queue_channel_id"]):
             if not channel_id:

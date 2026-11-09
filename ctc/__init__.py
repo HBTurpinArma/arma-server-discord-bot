@@ -38,6 +38,23 @@ class TransitionError(Exception):
     """A requested change is not legal for the row's current state."""
 
 
+def guest_of(row: Any) -> str | None:
+    """The Guest TI working a request alongside its TI, if there is one.
+
+    Read defensively: a row from before the column existed, or a plain dict,
+    may not carry it at all.
+    """
+    try:
+        return row["guest_instructor_id"] or None
+    except (KeyError, IndexError):
+        return None
+
+
+def instructors_of(row: Any) -> list[str]:
+    """Everyone working a request: the TI first, then any Guest TI."""
+    return [who for who in (row["instructor_id"], guest_of(row)) if who]
+
+
 class CTCDatabaseManager:
     def __init__(
         self,
@@ -239,9 +256,14 @@ class CTCDatabaseManager:
             if row["status"] == "completed":
                 sets += ["completed_at = NULL", "levels_achieved = NULL", "variant = NULL"]
 
-        # Releasing a claim clears the instructor and the claim timestamp.
+        # Back in the queue means nobody is on it: both seats and the claim
+        # timestamp are cleared.
         if nxt == "requested":
-            sets += ["instructor_id = NULL", "instructor_name = NULL", "claimed_at = NULL"]
+            sets += [
+                "instructor_id = NULL", "instructor_name = NULL",
+                "guest_instructor_id = NULL", "guest_instructor_name = NULL",
+                "claimed_at = NULL",
+            ]
 
         params.append(request_id)
         await self.connection.execute(
@@ -249,6 +271,75 @@ class CTCDatabaseManager:
         )
         await self.connection.commit()
         return await self.by_id(request_id)  # type: ignore[return-value]
+
+    async def claim(
+        self, request_id: int, *, instructor_id: str, instructor_name: str, guest: bool = False
+    ) -> aiosqlite.Row:
+        """Take one of a request's two seats: the TI's, or the Guest TI's.
+
+        Each seat is claimed on its own, so a Guest TI can join work a TI
+        already holds and the other way round. Whichever lands first takes the
+        request out of the queue.
+
+        The write only lands while the seat is still empty, so two people
+        pressing the same Claim together cannot both get it.
+        """
+        row = await self.by_id(request_id)
+        if row is None:
+            raise TransitionError(f"Request #{request_id} not found.")
+        if row["status"] not in ("requested", "claimed"):
+            raise TransitionError(f"Request #{request_id} is already {row['status']}.")
+
+        seat = "guest_instructor" if guest else "instructor"
+        taken = (
+            f"Request #{request_id} already has a Guest TI."
+            if guest
+            else f"Request #{request_id} is already claimed."
+        )
+        if str(instructor_id) in instructors_of(row):
+            raise TransitionError(f"You are already working request #{request_id}.")
+        if row[f"{seat}_id"]:
+            raise TransitionError(taken)
+
+        cursor = await self.connection.execute(
+            f"UPDATE ctc_requests SET {seat}_id = ?, {seat}_name = ?, status = 'claimed', "
+            "claimed_at = COALESCE(claimed_at, datetime('now')) "
+            f"WHERE id = ? AND {seat}_id IS NULL AND status IN ('requested', 'claimed')",
+            (str(instructor_id), instructor_name, request_id),
+        )
+        await self.connection.commit()
+        if cursor.rowcount == 0:
+            raise TransitionError(taken)
+        return await self.by_id(request_id)  # type: ignore[return-value]
+
+    async def release(self, request_id: int, *, actor_id: str) -> tuple[aiosqlite.Row, str]:
+        """Free a seat, and say which one: ``instructor`` or ``guest_instructor``.
+
+        Someone holding a seat gives up their own. Anyone else releasing (any
+        instructor may) frees the TI's seat first, as before there were two.
+        The request only goes back to the queue once both seats are empty.
+        """
+        row = await self.by_id(request_id)
+        if row is None:
+            raise TransitionError(f"Request #{request_id} not found.")
+        if row["status"] != "claimed":
+            raise TransitionError(f"Request #{request_id} is {row['status']}, not claimed.")
+
+        actor = str(actor_id)
+        guest = guest_of(row)
+        if guest == actor or not row["instructor_id"]:
+            seat, remaining = "guest_instructor", row["instructor_id"]
+        else:
+            seat, remaining = "instructor", guest
+
+        sets = [f"{seat}_id = NULL", f"{seat}_name = NULL"]
+        if not remaining:
+            sets += ["status = 'requested'", "claimed_at = NULL"]
+        await self.connection.execute(
+            f"UPDATE ctc_requests SET {', '.join(sets)} WHERE id = ?", (request_id,)
+        )
+        await self.connection.commit()
+        return await self.by_id(request_id), seat  # type: ignore[return-value]
 
     async def assign(
         self, request_id: int, *, instructor_id: str, instructor_name: str
@@ -270,12 +361,50 @@ class CTCDatabaseManager:
             raise TransitionError(
                 f"Request #{request_id} is {row['status']} — there is nothing left to work on."
             )
+        if guest_of(row) == str(instructor_id):
+            raise TransitionError(
+                f"<@{instructor_id}> is the Guest TI on this request. "
+                "Take them off as Guest TI first."
+            )
 
         sets = ["instructor_id = ?", "instructor_name = ?"]
         params: list[Any] = [str(instructor_id), instructor_name]
         if row["status"] == "requested":
             sets.append("status = 'claimed'")
             sets.append("claimed_at = datetime('now')")
+
+        params.append(request_id)
+        await self.connection.execute(
+            f"UPDATE ctc_requests SET {', '.join(sets)} WHERE id = ?", params
+        )
+        await self.connection.commit()
+        return await self.by_id(request_id)  # type: ignore[return-value]
+
+    async def assign_guest(
+        self, request_id: int, *, guest_id: str | None, guest_name: str | None
+    ) -> aiosqlite.Row:
+        """Put a Guest TI on a request alongside its TI, or take them off.
+
+        Mirrors ``assign`` for the second seat. A Guest TI on unclaimed work
+        takes it out of the queue; taking off the only person on it puts it
+        back.
+        """
+        row = await self.by_id(request_id)
+        if row is None:
+            raise TransitionError(f"Request #{request_id} not found.")
+        if row["status"] in ("awarded", "cancelled"):
+            raise TransitionError(
+                f"Request #{request_id} is {row['status']} — there is nothing left to work on."
+            )
+        if guest_id and row["instructor_id"] == str(guest_id):
+            raise TransitionError(f"<@{guest_id}> is already the TI on this request.")
+
+        sets = ["guest_instructor_id = ?", "guest_instructor_name = ?"]
+        params: list[Any] = [str(guest_id) if guest_id else None, guest_name if guest_id else None]
+        if guest_id and row["status"] == "requested":
+            sets += ["status = 'claimed'", "claimed_at = datetime('now')"]
+        elif not guest_id and row["status"] == "claimed" and not row["instructor_id"]:
+            sets += ["status = 'requested'", "claimed_at = NULL"]
 
         params.append(request_id)
         await self.connection.execute(
@@ -342,12 +471,18 @@ class CTCDatabaseManager:
         if row["status"] not in ("completed", "awarded"):
             raise TransitionError(f"Request #{request_id} is {row['status']} — it is already open.")
 
+        # The reopener takes the TI's seat, unless they already hold the
+        # Guest TI's: then both seats stay as they were.
+        lead_id, lead_name = str(instructor_id), instructor_name
+        if guest_of(row) == str(instructor_id):
+            lead_id, lead_name = row["instructor_id"], row["instructor_name"]
+
         await self.connection.execute(
             "UPDATE ctc_requests SET status = 'claimed', levels_achieved = NULL, variant = NULL, "
             "completed_at = NULL, awarded_at = NULL, instructor_id = ?, instructor_name = ?, "
             "claimed_at = COALESCE(claimed_at, datetime('now')), amended_at = datetime('now'), "
             "amended_by = ?, amended_by_name = ? WHERE id = ?",
-            (str(instructor_id), instructor_name, str(instructor_id), instructor_name, request_id),
+            (lead_id, lead_name, str(instructor_id), instructor_name, request_id),
         )
         await self.connection.commit()
         return await self.by_id(request_id)  # type: ignore[return-value]
@@ -447,13 +582,17 @@ class CTCDatabaseManager:
             f"WHERE 1=1{where} GROUP BY status",
             args,
         )
+        # A Guest TI does the same work from the second seat, so both count.
         by_instructor = await self._many(
-            "SELECT instructor_name AS name, COUNT(*) AS total, "
+            "SELECT name, COUNT(*) AS total, "
             "SUM(CASE WHEN status IN ('claimed','completed') THEN 1 ELSE 0 END) AS open, "
-            "SUM(CASE WHEN status = 'awarded' THEN 1 ELSE 0 END) AS awarded "
-            f"FROM ctc_requests WHERE instructor_id IS NOT NULL{where} "
-            "GROUP BY instructor_id, instructor_name ORDER BY total DESC",
-            args,
+            "SUM(CASE WHEN status = 'awarded' THEN 1 ELSE 0 END) AS awarded FROM ("
+            "SELECT instructor_id AS who, instructor_name AS name, status FROM ctc_requests "
+            f"WHERE instructor_id IS NOT NULL{where} UNION ALL "
+            "SELECT guest_instructor_id, guest_instructor_name, status FROM ctc_requests "
+            f"WHERE guest_instructor_id IS NOT NULL{where}"
+            ") GROUP BY who, name ORDER BY total DESC",
+            args + args,
         )
         turnaround = await self._many(
             "SELECT badge_key, COUNT(*) AS n, "
