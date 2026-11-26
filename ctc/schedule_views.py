@@ -83,7 +83,9 @@ def times_view(request_id: int) -> discord.ui.View:
             style=discord.ButtonStyle.success, emoji="\N{WHITE HEAVY CHECK MARK}",
         )
     )
-    view.add_item(ScheduleButton("date", request_id, label="Set a date", emoji="\N{CALENDAR}"))
+    view.add_item(
+        ScheduleButton("date", request_id, label="Set a Time/Date", emoji="\N{CALENDAR}")
+    )
     view.add_item(ScheduleButton("none", request_id, label="None of these work"))
     view.add_item(
         ScheduleButton("zone", request_id, label="My time zone", emoji="\N{GLOBE WITH MERIDIANS}")
@@ -111,7 +113,7 @@ def times_embed(cat: Catalogue, row: Any, summary: sched.Summary) -> discord.Emb
     ]
     embed = discord.Embed(
         colour=COLOUR,
-        title=f"\N{SPIRAL CALENDAR PAD} Pick a time · {badge.name if badge else row['badge_key']}",
+        title=f"\N{SPIRAL CALENDAR PAD} Schedule · {badge.name if badge else row['badge_key']}",
         description="\n".join(lines),
     )
     when = booked_for(row)
@@ -119,7 +121,8 @@ def times_embed(cat: Catalogue, row: Any, summary: sched.Summary) -> discord.Emb
         embed.add_field(
             name="\N{CALENDAR} Booked", value=f"<t:{when}:F> (<t:{when}:R>)", inline=False
         )
-    elif summary.both:
+    # Both show while a booked session is being moved.
+    if summary.both:
         embed.add_field(
             name="\N{WHITE HEAVY CHECK MARK} Both free, in your time",
             value=sched.describe(summary.both, limit=SHOWN_ON_MESSAGE),
@@ -162,9 +165,10 @@ class AvailabilityPicker(discord.ui.View):
     is no wait between hours, unlike a button per hour.
 
     ``theirs`` is the other side's free time: the trainee's for an
-    instructor, the instructors' for a trainee. A trainee is only offered
-    hours an instructor is around, so days with none are left out; an
-    instructor is offered every hour still to come.
+    instructor, the instructors' for a trainee. Either side can go first.
+    Whoever does is offered every hour still to come; the other side is then
+    ``limited`` to the hours the first one marked, so anything they tick is a
+    time both can do.
     """
 
     #: A message holds five rows; four lists leave one for the paging button.
@@ -182,8 +186,10 @@ class AvailabilityPicker(discord.ui.View):
         mine: set[int],
         theirs: list[tuple[int, int]],
         now: float,
+        limited: bool = False,
     ) -> None:
         super().__init__(timeout=840)  # inside the 15 minutes an ephemeral can be edited
+        self.limited = limited
         self.cog = cog
         self.row = row
         self.request_id = int(row["id"])
@@ -200,7 +206,8 @@ class AvailabilityPicker(discord.ui.View):
                 if hour.start is None or hour.start <= now:
                     continue
                 around = sched.covers(theirs, hour.start, hour.start + sched.HOUR)
-                if around or side == "trainer":
+                # An hour already ticked stays listed, so it can be unticked.
+                if around or not limited or hour.start in mine:
                     hours.append((hour.hour, hour.start, around))
             if hours:
                 self.days.append((day, hours))
@@ -214,16 +221,16 @@ class AvailabilityPicker(discord.ui.View):
             self.add_item(_MoreDaysButton(self))
 
     def content(self) -> str:
-        if self.side == "trainer":
-            how = (
-                "Open a day, tick every hour you are around, then click outside the list to "
-                f"save it. Hours <@{self.row['member_id']}> can already do are marked."
-            )
+        other = f"<@{self.row['member_id']}>" if self.side == "trainer" else "the instructor"
+        how = (
+            "Open a day, tick every hour you can do, then click outside the list to save it. "
+        )
+        if self.limited:
+            how += f"Only the hours {other} marked are listed."
+        elif self.side == "trainer":
+            how += f"Hours {other} can already do are marked."
         else:
-            how = (
-                "Open a day, tick every hour you can do, then click outside the list to save "
-                "it. Only hours an instructor is around are listed."
-            )
+            how += "Hours an instructor is around are marked."
         return f"**Your hours** · your time ({sched.zone_label(self.tz)})\n{how}"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -253,8 +260,11 @@ class _DaySelect(discord.ui.Select):
                     label=f"{hour:02d}:00",
                     value=str(start),
                     default=start in mine,
-                    description="Trainee can do this" if around and picker.side == "trainer"
-                    else None,
+                    description=(
+                        None if not around
+                        else "Trainee can do this" if picker.side == "trainer"
+                        else "Instructor is around"
+                    ),
                 )
                 for hour, start, around in hours
             ],
@@ -321,6 +331,104 @@ class _TimezoneSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await self.parent_view.cog.save_timezone(interaction, self.parent_view, self.values[0])
+
+
+class SideChoiceView(discord.ui.View):
+    """Whose hours to mark, for someone who is both the trainee and the TI
+    on the same request. Rare in real use, routine when testing alone."""
+
+    CONTENT = (
+        "You are both the trainee and the instructor on this request. "
+        "Whose hours are you marking?"
+    )
+
+    def __init__(self, cog: Any, request_id: int) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.request_id = request_id
+        self.add_item(_SideButton(self, "trainer", "As instructor"))
+        self.add_item(_SideButton(self, "trainee", "As trainee"))
+
+
+class _SideButton(discord.ui.Button):
+    def __init__(self, parent: SideChoiceView, side: str, label: str) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.primary)
+        self.parent_view = parent
+        self.side = side
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.cog.choose_side(interaction, self.parent_view.request_id, self.side)
+
+
+class RescheduleView(discord.ui.View):
+    """How to move a booked session: through the schedule tool, or straight
+    to a new time. Either way a reason is asked for first."""
+
+    def __init__(self, cog: Any, request_id: int, *, can_set: bool) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.request_id = request_id
+        self.add_item(
+            _RescheduleButton(
+                self, "tool", "Open Schedule Tool",
+                discord.ButtonStyle.primary, "\N{SPIRAL CALENDAR PAD}",
+            )
+        )
+        # Setting a time directly is for the TI and Guest TI, as when booking.
+        if can_set:
+            self.add_item(
+                _RescheduleButton(
+                    self, "date", "Schedule a new Time/Date",
+                    discord.ButtonStyle.secondary, "\N{CALENDAR}",
+                )
+            )
+
+    @staticmethod
+    def content(when: int) -> str:
+        return (
+            f"This session is booked for <t:{when}:F>. How do you want to move it?\n"
+            "You will be asked for a reason, which is posted in the thread. The current "
+            "booking stays until a new time is booked."
+        )
+
+
+class _RescheduleButton(discord.ui.Button):
+    def __init__(
+        self, parent: RescheduleView, mode: str, label: str,
+        style: discord.ButtonStyle, emoji: str,
+    ) -> None:
+        super().__init__(label=label, style=style, emoji=emoji)
+        self.parent_view = parent
+        self.mode = mode
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(
+            ReasonModal(self.parent_view.cog, self.parent_view.request_id, self.mode)
+        )
+
+
+class ReasonModal(discord.ui.Modal):
+    """Why a booked session is being moved. Required, and posted in the
+    thread, so a reschedule is never silent."""
+
+    def __init__(self, cog: Any, request_id: int, mode: str) -> None:
+        super().__init__(title="Reschedule", timeout=600)
+        self.cog = cog
+        self.request_id = request_id
+        self.mode = mode
+        self.reason = discord.ui.TextInput(
+            label="Why does this need rescheduling?",
+            style=discord.TextStyle.paragraph,
+            placeholder="Posted in the thread for everyone on the request",
+            min_length=5,
+            max_length=300,
+        )
+        self.add_item(self.reason)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.start_reschedule(
+            interaction, self.request_id, self.mode, self.reason.value
+        )
 
 
 class SetDateView(discord.ui.View):

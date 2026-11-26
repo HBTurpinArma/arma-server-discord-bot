@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 HOUR = 3600
 
-#: How far ahead the grid goes, counting today.
+#: How far ahead the hour lists go, counting today.
 DAYS_AHEAD = 7
 
 #: Offered when someone sets their time zone. Named for the people picking,

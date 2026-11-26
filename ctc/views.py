@@ -61,10 +61,6 @@ def relative(stamp: str | None) -> str:
     return f"<t:{int(parsed.timestamp())}:R>"
 
 
-def describe_kind(badge: Badge) -> str:
-    return {"timed": "Timed test", "graded": "Graded", "tab": "Tab"}[badge.kind]
-
-
 # ----------------------------------------------------------------- embeds
 
 
@@ -244,7 +240,7 @@ def ticket_embed(cat: Catalogue, row: Any, site_url: str = "") -> discord.Embed:
 #: swallow any other ``ctc:*:*`` custom_id — the panel button did exactly that.
 TICKET_ACTIONS = (
     "claim", "guest", "cancel", "release", "complete", "result", "award", "reopen", "assign",
-    "times", "date",
+    "times", "date", "resched",
 )
 
 
@@ -348,10 +344,24 @@ def ticket_view(
                     TicketButton("result", rid, label="Partial", emoji="\N{WARNING SIGN}")
                 )
         claim_buttons()
-        view.add_item(
-            TicketButton("times", rid, label="Pick a time", emoji="\N{SPIRAL CALENDAR PAD}")
-        )
-        view.add_item(TicketButton("date", rid, label="Set a date", emoji="\N{CALENDAR}"))
+        if booked_for(row):
+            # Moving a booked session asks for a reason first, so the two
+            # ways in sit behind one button.
+            view.add_item(
+                TicketButton(
+                    "resched", rid, label="Reschedule",
+                    emoji="\N{CLOCKWISE RIGHTWARDS AND LEFTWARDS OPEN CIRCLE ARROWS}",
+                )
+            )
+        else:
+            view.add_item(
+                TicketButton(
+                    "times", rid, label="Open Schedule Tool", emoji="\N{SPIRAL CALENDAR PAD}"
+                )
+            )
+            view.add_item(
+                TicketButton("date", rid, label="Set a Time/Date", emoji="\N{CALENDAR}")
+            )
         view.add_item(TicketButton("release", rid, label="Release"))
         view.add_item(TicketButton("assign", rid, label="Reassign…"))
         view.add_item(TicketButton("cancel", rid, label="Cancel", style=discord.ButtonStyle.danger))

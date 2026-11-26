@@ -16,6 +16,10 @@ Member                          Instructor
   ↓ optional notes
   └─→ one thread per badge ───→ [ Claim ]
                                   ↓
+  [ Open Schedule Tool ] ←────→ [ Open Schedule Tool ] / [ Set a Time/Date ]
+    either side marks hours        ↓
+                               [ Book a time ] ──→ booked, reminder an hour before
+                                  ↓
                                [ Badge Completed ] / [ All passed ]
                                [ Partial ] / [ Record result ]
                                   ↓
@@ -396,24 +400,25 @@ On a private thread, give the Guest TI role Manage Threads on the queue channel
 (as instructors have) or they will not see cards to claim. Seating someone
 through **Assign…** adds them to the thread either way.
 
-## Picking a time
+## Scheduling a session
 
-**Pick a time** on a claimed card posts a shared message in the request's
-thread and opens the instructor's hour lists. Everything after that happens from
-the shared message:
+**Open Schedule Tool** on a claimed card posts a shared message in the
+request's thread and opens the presser's hour lists. Everything after that
+happens from the shared message:
 
 - Only the request's own TI, its Guest TI and the trainee take part. Other
   instructors are refused, and hours left by an instructor who has since been
-  released or reassigned stop counting. **Pick a time** on the card is for the
-  TI or Guest TI; the trainee joins from the shared message.
+  released or reassigned stop counting.
+- Either side can go first: the trainee or the TI can open the tool and mark
+  hours before the other has. Whoever goes first is offered every hour still
+  to come. The other side is then limited to the hours the first one marked,
+  so anything they tick is a time both can do. The first side can add more
+  hours at any time.
 - **Mark my times** opens a private set of lists, one per day for the next 7
   days, labelled on your own clock. Open a day, tick every hour, and click
   outside the list: the whole day saves at once. Four days fit on a page, with
   a button for the rest.
-- The instructor is offered every hour still to come, with the ones the trainee
-  can already do marked. The trainee is only offered hours an instructor is
-  around, so days with none are left out. A TI's and a Guest TI's hours are
-  pooled.
+- A TI's and a Guest TI's hours are pooled.
 - The shared message stays short: how many hours each side has marked, and the
   next five times both are free (or the booked time, once there is one). Those
   times are Discord timestamps, so each reader sees their own local time.
@@ -421,17 +426,19 @@ the shared message:
   on their own clock.
 - Each side is pinged once per request, five minutes after the other's last
   tap: the trainee the first time the instructor has marked hours, the
-  instructor the first time the trainee has picked theirs. Later changes update
-  the shared message without pinging anyone.
+  instructor the first time the trainee has picked theirs (to book, or to add
+  their own hours if the trainee went first). Later changes update the shared
+  message without pinging anyone.
 - A ping that would ask for something already done is skipped: no ping to the
   trainee if they have already picked hours, none to the instructor if the
   session is already booked.
-- **None of these work** (trainee) pings the instructor to add more hours.
+- **None of these work** pings the other side to add more hours. The trainee
+  or the TI (or Guest TI) can press it.
 - **Book a time** offers start times where both are free, in the booker's own
   time. Only the request's own TI or Guest TI can book. The booked time goes on
   the card and the shared message, and everyone on the request is pinged about
   an hour before.
-- **Set a date**, on the card and on the shared message, books a time agreed
+- **Set a Time/Date**, on the card and on the shared message, books a time agreed
   without the lists: pick the day (next 25 days), hour and minute on your own
   clock. It books exactly like **Book a time**, with the same rule: only the
   request's own TI or Guest TI, never the trainee or another instructor.
@@ -442,8 +449,18 @@ the shared message:
   has passed, bumps and chase-ups carry on as before.
 - Once a time is booked, the shared message and the pings that led up to it
   are deleted, leaving the card's Booked line and one "Booked for" message. A
-  rebooking replaces that message. To move a session, use **Set a date** on the
-  card, or **Pick a time** for a fresh shared message.
+  rebooking replaces that message.
+- Once a time is booked, the card's two scheduling buttons become one:
+  **Reschedule**. It offers **Open Schedule Tool** (TI, Guest TI or trainee) or
+  **Schedule a new Time/Date** (TI or Guest TI), and either asks for a reason
+  first. The reason is posted in the thread with who asked, and pings everyone
+  on the request. The schedule tool opens with the hours marked before, minus
+  any that have passed. Who goes first is open again: whichever side marks
+  hours first after the reschedule is offered every hour, and the other side
+  then picks from theirs.
+- The current booking stays until a new time is booked, so the thread keeps
+  quiet and the reminder holds if a reschedule is never finished. While one is
+  under way, each side can be pinged once more about the other's hours.
 - **My time zone** changes it. Discord never tells a bot where someone is, so
   each person picks once, the first time they open their hours, and it is
   remembered for every request.
@@ -535,9 +552,28 @@ restart is enough.
 python -m ctc.selftest
 ```
 
-79 offline checks — catalogue validation, all three badge kinds, variants, the
-full request lifecycle, amendments, and that every view fits Discord's component
-limits. No Discord connection required.
+108 offline checks — catalogue validation, all three badge kinds, variants, the
+full request lifecycle, amendments, Guest TIs, scheduling (time zones, clock
+changes, who may press what, pings, rescheduling), and that every view fits
+Discord's component limits. No Discord connection required.
+
+## Where the code lives
+
+| File | What it holds |
+| --- | --- |
+| `cogs/ctc.py` | The cog: commands, permissions, posting requests, the ticket card's buttons, keep-alive bumps and chase-ups. |
+| `ctc/scheduling.py` | Scheduling, as a mixin the cog inherits: the schedule tool, booking, rescheduling, the reminder. |
+| `ctc/__init__.py` | The database layer and the request status machine. |
+| `ctc/views.py` | The ticket card and the request, result, amend and assign screens. |
+| `ctc/schedule_views.py` | The shared schedule message and the hour lists, time zone, booking and reschedule screens. |
+| `ctc/schedule.py` | Time zone and hour-range logic, with no Discord in it. |
+| `ctc/catalogue.py`, `ctc/units.py` | Badge catalogues and per-battalion settings. |
+| `ctc/config_views.py` | The `/badge config` editor. |
+| `ctc/schema.sql` | Tables. Columns added later are also listed in `LATER_COLUMNS` in the cog, which adds them to a live database on startup. |
+| `ctc/selftest.py` | The offline checks. |
+
+Helper modules go in `ctc/`, not `cogs/`: the bot loads every file in `cogs/`
+as an extension.
 
 ## Known limits
 

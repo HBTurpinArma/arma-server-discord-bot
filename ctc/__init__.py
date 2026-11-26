@@ -7,6 +7,7 @@ row — which also makes a double-clicked button harmless.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
@@ -64,6 +65,44 @@ def booked_for(row: Any) -> int | None:
         return None
 
 
+def booked_ahead(row: Any, now: float | None = None) -> bool:
+    """True while a request has a session booked that has not started yet.
+
+    Until then its thread is quiet on purpose: no keep-alive bump and no
+    chase-up, only the reminder before the session.
+    """
+    when = booked_for(row)
+    return when is not None and when > (time.time() if now is None else now)
+
+
+def rescheduling(row: Any) -> bool:
+    """True while a booked session is being moved: a reason has been given
+    and no new time is booked yet. Read defensively, like ``booked_for``."""
+    try:
+        return bool(row["rescheduling_at"])
+    except (KeyError, IndexError):
+        return False
+
+
+def first_side(row: Any) -> str | None:
+    """Which side marked hours first, if recorded. Read defensively."""
+    try:
+        return row["first_side"] or None
+    except (KeyError, IndexError):
+        return None
+
+
+def home_of(row: Any) -> str | None:
+    """Where a request's messages go: its thread, or the queue channel when
+    it has none. None for a request that was never posted."""
+    return row["thread_id"] or row["queue_channel_id"]
+
+
+def mention_all(user_ids: Iterable[Any]) -> str:
+    """User ids as a space-separated run of mentions."""
+    return " ".join(f"<@{user_id}>" for user_id in user_ids)
+
+
 class CTCDatabaseManager:
     def __init__(
         self,
@@ -97,18 +136,6 @@ class CTCDatabaseManager:
 
     async def by_thread(self, thread_id: str) -> aiosqlite.Row | None:
         return await self._one("SELECT * FROM ctc_requests WHERE thread_id = ?", (str(thread_id),))
-
-    async def by_group(self, group_id: str) -> list[aiosqlite.Row]:
-        return await self._many(
-            "SELECT * FROM ctc_requests WHERE group_id = ? ORDER BY id", (group_id,)
-        )
-
-    async def open_for_member(self, member_id: str) -> list[aiosqlite.Row]:
-        return await self._many(
-            "SELECT * FROM ctc_requests WHERE member_id = ? AND status IN "
-            "('requested','claimed','completed') ORDER BY id",
-            (str(member_id),),
-        )
 
     async def queue(
         self,
@@ -596,25 +623,6 @@ class CTCDatabaseManager:
             (request_id,),
         )
 
-    async def toggle_slot(
-        self, request_id: int, *, user_id: str, side: str, slot_start: int
-    ) -> bool:
-        """Mark one hour, or unmark it if it was marked. True if it is now marked."""
-        cursor = await self.connection.execute(
-            "DELETE FROM ctc_availability "
-            "WHERE request_id = ? AND user_id = ? AND side = ? AND slot_start = ?",
-            (request_id, str(user_id), side, int(slot_start)),
-        )
-        marked = cursor.rowcount == 0
-        if marked:
-            await self.connection.execute(
-                "INSERT INTO ctc_availability (request_id, user_id, side, slot_start) "
-                "VALUES (?, ?, ?, ?)",
-                (request_id, str(user_id), side, int(slot_start)),
-            )
-        await self.connection.commit()
-        return marked
-
     async def set_slots(
         self,
         request_id: int,
@@ -664,7 +672,7 @@ class CTCDatabaseManager:
         await self.connection.commit()
 
     async def clear_times_messages(self, request_id: int) -> None:
-        """Forget the Pick a time message and its pings, once they are deleted."""
+        """Forget the schedule message and its pings, once they are deleted."""
         await self.connection.execute(
             "UPDATE ctc_requests SET times_message_id = NULL, times_note_ids = NULL WHERE id = ?",
             (request_id,),
@@ -685,12 +693,35 @@ class CTCDatabaseManager:
         if row["status"] != "claimed":
             raise TransitionError(f"Request #{request_id} is {row['status']}, not claimed.")
         await self.connection.execute(
-            "UPDATE ctc_requests SET booked_for = ?, booked_by = ?, reminded_at = NULL "
-            "WHERE id = ?",
+            "UPDATE ctc_requests SET booked_for = ?, booked_by = ?, reminded_at = NULL, "
+            "rescheduling_at = NULL WHERE id = ?",
             (int(when), str(booked_by), request_id),
         )
         await self.connection.commit()
         return await self.by_id(request_id)  # type: ignore[return-value]
+
+    async def set_first_side(self, request_id: int, side: str) -> None:
+        """Record which side marked hours first: ``trainer`` or ``trainee``.
+        The other side then picks from those hours. Set once per request."""
+        await self.connection.execute(
+            "UPDATE ctc_requests SET first_side = ? WHERE id = ? AND first_side IS NULL",
+            (side, request_id),
+        )
+        await self.connection.commit()
+
+    async def start_reschedule(self, request_id: int) -> None:
+        """Mark a booked session as being moved, until the next booking.
+
+        The booking itself stays. Each side can be pinged once again about
+        the other's hours, as for a first booking, and who goes first is open
+        again: the next side to mark hours is offered every hour.
+        """
+        await self.connection.execute(
+            "UPDATE ctc_requests SET rescheduling_at = datetime('now'), first_side = NULL, "
+            "trainer_times_pinged_at = NULL, trainee_times_pinged_at = NULL WHERE id = ?",
+            (request_id,),
+        )
+        await self.connection.commit()
 
     async def due_reminders(self, *, now: int, within: int) -> list[aiosqlite.Row]:
         """Claimed requests booked to start in the next ``within`` seconds, not yet reminded."""
